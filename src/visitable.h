@@ -2,9 +2,6 @@
 #ifndef VISITABLE_H
 #define VISITABLE_H
 
-#include "enums.h"
-#include "string_id.h"
-
 #include <functional>
 #include <limits>
 #include <list>
@@ -12,6 +9,8 @@
 #include <vector>
 
 class item;
+template<typename T>
+class string_id;
 struct quality;
 using quality_id = string_id<quality>;
 
@@ -73,12 +72,14 @@ class visitable
 
         /**
          * Count maximum available charges from this instance and any contained items
+         * @param what ID of item to count charges of
          * @param limit stop searching after this many charges have been found
          */
         long charges_of( const std::string &what, long limit = std::numeric_limits<long>::max() ) const;
 
         /**
          * Count items matching id including both this instance and any contained items
+         * @param what ID of items to count
          * @param pseudo whether pseudo-items (from map/vehicle tiles, bionics etc) are considered
          * @param limit stop searching after this many matches
          * @note items must be empty to be considered a match

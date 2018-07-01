@@ -5,7 +5,6 @@
     "om_terrain": [ "basement" ],
     "weight": 250,
     "object": {
-      "fill_ter": "t_rock",
       "rotation": [ 0, 3 ],
       "rows": [
         "|----|                  ",
@@ -33,37 +32,9 @@
         "                        ",
         "                        "
       ],
-      "terrain": {
-        "&": "t_rock_floor",
-        "+": "t_door_c",
-        "-": "t_wall",
-        ".": "t_rock_floor",
-        "<": "t_stairs_up",
-        "a": "t_rock_floor",
-        "b": "t_rock_floor",
-        "c": "t_rock_floor",
-        "f": "t_rock_floor",
-        "i": "t_rock_floor",
-        "p": "t_rock_floor",
-        "r": "t_rock_floor",
-        "s": "t_rock_floor",
-        "t": "t_rock_floor",
-        "|": "t_wall"
-      },
-      "furniture": {
-        "a": "f_armchair",
-        "b": "f_bookcase",
-        "c": "f_counter",
-        "f": "f_fridge",
-        "i": "f_sink",
-        "p": "f_pool_table",
-        "r": "f_rack",
-        "s": "f_sofa",
-        "t": "f_table"
-      },
-      "toilets": {
-        "&": {}
-      },
+      "palettes": [
+        "basement_game"
+      ],
       "place_loot": [
         { "group": "alcohol", "x": [ 16, 20 ], "y": 5, "chance": 96 },
         { "group": "fridgesnacks", "x": [ 13, 20 ], "y": 5, "chance": 80 },
@@ -83,7 +54,6 @@
     "om_terrain": [ "basement" ],
     "weight": 250,
     "object": {
-      "fill_ter": "t_rock",
       "rotation": [ 0, 3 ],
       "rows": [
         "|----|                  ",
@@ -111,41 +81,9 @@
         "                        ",
         "                        "
       ],
-      "terrain": {
-        "&": "t_rock_floor",
-        "+": "t_door_c",
-        "-": "t_wall",
-        ".": "t_rock_floor",
-        "<": "t_stairs_up",
-        "a": "t_rock_floor",
-        "b": "t_rock_floor",
-        "c": "t_rock_floor",
-        "d": "t_rock_floor",
-        "f": "t_rock_floor",
-        "i": "t_rock_floor",
-        "p": "t_rock_floor",
-        "r": "t_rock_floor",
-        "s": "t_rock_floor",
-        "t": "t_rock_floor",
-        "w": "t_rock_floor",
-        "|": "t_wall"
-      },
-      "furniture": {
-        "a": "f_armchair",
-        "b": "f_bookcase",
-        "c": "f_counter",
-        "d": "f_dryer",
-        "f": "f_fridge",
-        "i": "f_sink",
-        "p": "f_pool_table",
-        "r": "f_rack",
-        "s": "f_sofa",
-        "t": "f_table",
-        "w": "f_washer"
-      },
-      "toilets": {
-        "&": {}
-      },
+      "palettes": [
+        "basement_game"
+      ],
       "place_loot": [
         { "group": "alcohol", "x": [ 16, 20 ], "y": 5, "chance": 96 },
         { "group": "fridgesnacks", "x": [ 13, 20 ], "y": 5, "chance": 80 },
@@ -168,7 +106,6 @@
     "om_terrain": [ "basement" ],
     "weight": 250,
     "object": {
-      "fill_ter": "t_rock",
       "rotation": [ 0, 3 ],
       "rows": [
         "|----|                  ",
@@ -196,35 +133,9 @@
         "                        ",
         "                        "
       ],
-      "terrain": {
-        "&": "t_rock_floor",
-        "+": "t_door_c",
-        "-": "t_wall",
-        ".": "t_rock_floor",
-        "<": "t_stairs_up",
-        "a": "t_rock_floor",
-        "c": "t_rock_floor",
-        "f": "t_rock_floor",
-        "i": "t_rock_floor",
-        "p": "t_rock_floor",
-        "r": "t_rock_floor",
-        "s": "t_rock_floor",
-        "t": "t_rock_floor",
-        "|": "t_wall"
-      },
-      "furniture": {
-        "a": "f_armchair",
-        "c": "f_counter",
-        "f": "f_fridge",
-        "i": "f_sink",
-        "p": "f_pool_table",
-        "r": "f_rack",
-        "s": "f_sofa",
-        "t": "f_table"
-      },
-      "toilets": {
-        "&": {}
-      },
+      "palettes": [
+        "basement_game"
+      ],
       "place_loot": [
         { "group": "alcohol", "x": [ 16, 20 ], "y": 5, "chance": 96 },
         { "group": "fridgesnacks", "x": [ 13, 20 ], "y": 5, "chance": 80 },
@@ -242,7 +153,6 @@
     "om_terrain": [ "basement" ],
     "weight": 250,
     "object": {
-      "fill_ter": "t_rock",
       "rotation": [ 0, 3 ],
       "rows": [
         "|----|                  ",
@@ -270,39 +180,9 @@
         "                        ",
         "                        "
       ],
-      "terrain": {
-        "&": "t_rock_floor",
-        "+": "t_door_c",
-        "-": "t_wall",
-        ".": "t_rock_floor",
-        "<": "t_stairs_up",
-        "a": "t_rock_floor",
-        "c": "t_rock_floor",
-        "d": "t_rock_floor",
-        "f": "t_rock_floor",
-        "i": "t_rock_floor",
-        "p": "t_rock_floor",
-        "r": "t_rock_floor",
-        "s": "t_rock_floor",
-        "t": "t_rock_floor",
-        "w": "t_rock_floor",
-        "|": "t_wall"
-      },
-      "furniture": {
-        "a": "f_armchair",
-        "c": "f_counter",
-        "d": "f_dryer",
-        "f": "f_fridge",
-        "i": "f_sink",
-        "p": "f_pool_table",
-        "r": "f_rack",
-        "s": "f_sofa",
-        "t": "f_table",
-        "w": "f_washer"
-      },
-      "toilets": {
-        "&": {}
-      },
+      "palettes": [
+        "basement_game"
+      ],
       "place_loot": [
         { "group": "alcohol", "x": [ 16, 20 ], "y": 5, "chance": 96 },
         { "group": "fridgesnacks", "x": [ 13, 20 ], "y": 5, "chance": 80 },

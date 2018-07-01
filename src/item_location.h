@@ -4,13 +4,13 @@
 
 #include <memory>
 
-#include "json.h"
-
 struct tripoint;
 class item;
 class Character;
 class map_cursor;
 class vehicle_cursor;
+class JsonIn;
+class JsonOut;
 
 /**
  * A lightweight handle to an item independent of it's location
@@ -18,7 +18,7 @@ class vehicle_cursor;
  * Provides a generic interface of querying, obtaining and removing an item
  * Is invalidated by many operations (including copying of the item)
  */
-class item_location : public JsonSerializer, public JsonDeserializer
+class item_location
 {
     public:
         enum class type : int {
@@ -66,6 +66,7 @@ class item_location : public JsonSerializer, public JsonDeserializer
         std::string describe( const Character *ch = nullptr ) const;
 
         /** Move an item from the location to the character inventory
+         *  @param ch Character who's inventory gets the item
          *  @param qty if specified limits maximum obtained charges
          *  @warning caller should restack inventory if item is to remain in it
          *  @warning all further operations using this class are invalid
