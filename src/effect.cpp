@@ -491,33 +491,33 @@ std::string effect::disp_desc(bool reduced) const
     // First print stat changes, adding + if value is positive
     int tmp = get_avg_mod("STR", reduced);
     if (tmp > 0) {
-        ret << string_format(_("Strength +%d;  "), tmp);
+        ret << string_format(_("Strength +%d   "), tmp);
     } else if (tmp < 0) {
-        ret << string_format(_("Strength %d;  "), tmp);
+        ret << string_format(_("Strength %d   "), tmp);
     }
     tmp = get_avg_mod("DEX", reduced);
     if (tmp > 0) {
-        ret << string_format(_("Dexterity +%d;  "), tmp);
+        ret << string_format(_("Dexterity +%d   "), tmp);
     } else if (tmp < 0) {
-        ret << string_format(_("Dexterity %d;  "), tmp);
+        ret << string_format(_("Dexterity %d   "), tmp);
     }
     tmp = get_avg_mod("PER", reduced);
     if (tmp > 0) {
-        ret << string_format(_("Perception +%d;  "), tmp);
+        ret << string_format(_("Perception +%d   "), tmp);
     } else if (tmp < 0) {
-        ret << string_format(_("Perception %d;  "), tmp);
+        ret << string_format(_("Perception %d   "), tmp);
     }
     tmp = get_avg_mod("INT", reduced);
     if (tmp > 0) {
-        ret << string_format(_("Intelligence +%d;  "), tmp);
+        ret << string_format(_("Intelligence +%d   "), tmp);
     } else if (tmp < 0) {
-        ret << string_format(_("Intelligence %d;  "), tmp);
+        ret << string_format(_("Intelligence %d   "), tmp);
     }
     tmp = get_avg_mod("SPEED", reduced);
     if (tmp > 0) {
-        ret << string_format(_("Speed +%d;  "), tmp);
+        ret << string_format(_("Speed +%d   "), tmp);
     } else if (tmp < 0) {
-        ret << string_format(_("Speed %d;  "), tmp);
+        ret << string_format(_("Speed %d   "), tmp);
     }
     // Newline if necessary
     if( !ret.str().empty() ) {
@@ -584,13 +584,13 @@ std::string effect::disp_desc(bool reduced) const
         }
     }
     if (constant.size() > 0) {
-        ret << _("Const: ") << enumerate_as_string( constant ) << " ";
+        ret << _("Const: ") << enumerate_as_string( constant ) << "   ";
     }
     if (frequent.size() > 0) {
-        ret << _("Freq: ") << enumerate_as_string( frequent ) << " ";
+        ret << _("Freq: ") << enumerate_as_string( frequent ) << "   ";
     }
     if (uncommon.size() > 0) {
-        ret << _("Unfreq: ") << enumerate_as_string( uncommon ) << " ";
+        ret << _("Unfreq: ") << enumerate_as_string( uncommon ) << "   ";
     }
     if (rare.size() > 0) {
         ret << _("Rare: ") << enumerate_as_string( rare ); // No space needed at the end
