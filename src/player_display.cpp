@@ -19,102 +19,6 @@ const skill_id skill_swimming( "swimming" );
 // use this instead of having to type out 26 spaces like before
 static const std::string header_spaces( 26, ' ' );
 
-// Rescale temperature value to one that the player sees
-int temperature_print_rescaling( int temp )
-{
-    return ( temp / 100.0 ) * 2 - 100;
-}
-
-bool should_combine_bps( const player &p, size_t l, size_t r )
-{
-    const auto enc_data = p.get_encumbrance();
-    return enc_data[l] == enc_data[r] &&
-           temperature_print_rescaling( p.temp_conv[l] ) == temperature_print_rescaling( p.temp_conv[r] );
-}
-
-void player::print_encumbrance( const catacurses::window &win, int line,
-                                item *selected_clothing ) const
-{
-    const int height = getmaxy( win );
-    int orig_line = line;
-
-    // fill a set with the indices of the body parts to display
-    line = std::max( 0, line );
-    std::set<int> parts;
-    // check and optionally enqueue line+0, -1, +1, -2, +2, ...
-    int off = 0; // offset from line
-    int skip[2] = {}; // how far to skip on next neg/pos jump
-    do {
-        if( !skip[off > 0] && line + off >= 0 && line + off < num_bp ) { // line+off is in bounds
-            parts.insert( line + off );
-            if( line + off != ( int )bp_aiOther[line + off] &&
-                should_combine_bps( *this, line + off, bp_aiOther[line + off] ) ) { // part of a pair
-                skip[( int )bp_aiOther[line + off] > line + off ] = 1; // skip the next candidate in this direction
-            }
-        } else {
-            skip[off > 0] = 0;
-        }
-        if( off < 0 ) {
-            off = -off;
-        } else {
-            off = -off - 1;
-        }
-    } while( off > -num_bp && ( int )parts.size() < height - 1 );
-
-    std::string out;
-    /*** I chose to instead only display X+Y instead of X+Y=Z. More room was needed ***
-     *** for displaying triple digit encumbrance, due to new encumbrance system.    ***
-     *** If the player wants to see the total without having to do them maths, the  ***
-     *** armor layers ui shows everything they want :-) -Davek                      ***/
-    int row = 1;
-    const auto enc_data = get_encumbrance();
-    for( auto bp : parts ) {
-        const encumbrance_data &e = enc_data[bp];
-        bool highlighted = ( selected_clothing == nullptr ) ? false :
-                           ( selected_clothing->covers( static_cast<body_part>( bp ) ) );
-        bool combine = should_combine_bps( *this, bp, bp_aiOther[bp] );
-        out.clear();
-        // limb, and possible color highlighting
-        // @todo: utf8 aware printf would be nice... this works well enough for now
-        out = body_part_name_as_heading( all_body_parts[bp], combine ? 2 : 1 );
-
-        int len = 7 - utf8_width( out );
-        switch( sgn( len ) ) {
-            case -1:
-                out = utf8_truncate( out, 7 );
-                break;
-            case 1:
-                out = out + std::string( len, ' ' );
-                break;
-        }
-
-        // Two different highlighting schemes, highlight if the line is selected as per line being set.
-        // Make the text green if this part is covered by the passed in item.
-        nc_color limb_color = ( orig_line == bp ) ?
-                              ( highlighted ? h_green : h_light_gray ) :
-                              ( highlighted ? c_green : c_light_gray );
-        mvwprintz( win, row, 1, limb_color, out.c_str() );
-        // accumulated encumbrance from clothing, plus extra encumbrance from layering
-        wprintz( win, encumb_color( e.encumbrance ), string_format( "%3d", e.armor_encumbrance ).c_str() );
-        // separator in low toned color
-        wprintz( win, c_light_gray, "+" );
-        // take into account the new encumbrance system for layers
-        wprintz( win, encumb_color( e.encumbrance ), string_format( "%-3d",
-                 e.layer_penalty ).c_str() );
-        // print warmth, tethered to right hand side of the window
-        out = string_format( "(% 3d)", temperature_print_rescaling( temp_conv[bp] ) );
-        mvwprintz( win, row, getmaxx( win ) - 6, bodytemp_color( bp ), out.c_str() );
-        row++;
-    }
-
-    if( off > -num_bp ) { // not every body part fit in the window
-        //TODO: account for skipped paired body parts in scrollbar math
-        draw_scrollbar( win, std::max( orig_line, 0 ), height - 1, num_bp, 1 );
-    }
-
-}
-
-
 std::string swim_cost_text( int moves )
 {
     return string_format( ngettext( "Swimming costs %+d movement point. ",
@@ -218,6 +122,278 @@ std::string get_encumbrance_description( const player &p, body_part bp, bool com
 
     return s;
 }
+
+class player_window {
+    const std::string title;
+protected:
+    catacurses::window w_this;
+    catacurses::window w_info;
+    const player &p;
+
+    virtual unsigned values() = 0;
+    virtual void print_line(unsigned line, int y, bool selected) = 0;
+public:
+    player_window(catacurses::window w_this, catacurses::window w_info, const player &player, const std::string title)
+        : w_this(w_this), w_info(w_info), title(title), p(player) {}
+
+    void print(int selected_line = - 1) 
+    {
+        nc_color color = (selected_line != -1) ? h_light_gray : c_light_gray;
+
+        werase(w_this);
+        mvwprintz(w_this, 0, 0, color, header_spaces);
+        center_print(w_this, 0, color, title);
+
+        unsigned lines = std::min(unsigned(catacurses::getmaxy(w_this) - 1), values());
+
+        // TODO: scrolling
+        for (unsigned i = 0; i < lines; i++)
+        {
+            print_line(i, i + 1, i == selected_line);
+        }
+
+        wrefresh(w_this);
+    }
+};
+
+class stats_window : public player_window
+{
+private:
+    void display_stat(const char *name, int cur, int max, int line_n, bool selected) {
+        nc_color cstatus;
+        if (cur <= 0) {
+            cstatus = c_dark_gray;
+        }
+        else if (cur < max / 2) {
+            cstatus = c_red;
+        }
+        else if (cur < max) {
+            cstatus = c_light_red;
+        }
+        else if (cur == max) {
+            cstatus = c_white;
+        }
+        else if (cur < max * 1.5) {
+            cstatus = c_light_green;
+        }
+        else {
+            cstatus = c_green;
+        }
+
+        mvwprintz(w_this, line_n, 1, selected ? h_light_gray : c_light_gray, name);
+        mvwprintz(w_this, line_n, 18, cstatus, "%2d", cur);
+        mvwprintz(w_this, line_n, 21, c_light_gray, "(%2d)", max);
+    }
+protected:
+    virtual unsigned values() override
+    {
+        return 4;
+    }
+
+    virtual void print_line(unsigned line, int y, bool selected) override
+    {
+        y++;
+
+        if (line == 0) {
+            // Display information on player strength in appropriate window
+            display_stat(_("Strength:"), p.str_cur, p.str_max, y, selected);
+
+            if (selected)
+            {
+                fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
+                    _("Strength affects your melee damage, the amount of weight you can carry, your total HP, "
+                        "your resistance to many diseases, and the effectiveness of actions which require brute force."));
+                mvwprintz(w_info, 3, 1, c_magenta, _("Base HP:"));
+                mvwprintz(w_info, 3, 22, c_magenta, "%3d", p.hp_max[1]);
+                if (get_option<std::string>("USE_METRIC_WEIGHTS") == "kg") {
+                    mvwprintz(w_info, 4, 1, c_magenta, _("Carry weight(kg):"));
+                }
+                else {
+                    mvwprintz(w_info, 4, 1, c_magenta, _("Carry weight(lbs):"));
+                }
+                mvwprintz(w_info, 4, 21, c_magenta, "%4.1f", convert_weight(p.weight_capacity()));
+                mvwprintz(w_info, 5, 1, c_magenta, _("Melee damage:"));
+                mvwprintz(w_info, 5, 22, c_magenta, "%3.1f", p.bonus_damage(false));
+            }
+        }
+        else if (line == 1) {
+            display_stat(_("Dexterity:"), p.dex_cur, p.dex_max, y, selected);
+
+            if (selected)
+            {
+                fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
+                    _("Dexterity affects your chance to hit in melee combat, helps you steady your "
+                        "gun for ranged combat, and enhances many actions that require finesse."));
+                mvwprintz(w_info, 3, 1, c_magenta, _("Melee to-hit bonus:"));
+                mvwprintz(w_info, 3, 38, c_magenta, "%+.1lf", p.get_hit_base());
+                mvwprintz(w_info, 4, 1, c_magenta, _("Ranged penalty:"));
+                mvwprintz(w_info, 4, 38, c_magenta, "%+3d", -(abs(p.ranged_dex_mod())));
+                mvwprintz(w_info, 5, 1, c_magenta, _("Throwing penalty per target's dodge:"));
+                mvwprintz(w_info, 5, 38, c_magenta, "%+3d", p.throw_dispersion_per_dodge(false));
+            }
+        }
+        else if (line == 2) {
+            display_stat(_("Intelligence:"), p.int_cur, p.int_max, y, selected);
+
+            if (selected)
+            {
+                fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
+                    _("Intelligence is less important in most situations, but it is vital for more complex tasks like "
+                        "electronics crafting.  It also affects how much skill you can pick up from reading a book."));
+                mvwprintz(w_info, 3, 1, c_magenta, _("Read times:"));
+                mvwprintz(w_info, 3, 21, c_magenta, "%3d%%", p.read_speed(false));
+                mvwprintz(w_info, 4, 1, c_magenta, _("Skill rust:"));
+                mvwprintz(w_info, 4, 22, c_magenta, "%2d%%", p.rust_rate(false));
+                mvwprintz(w_info, 5, 1, c_magenta, _("Crafting bonus:"));
+                mvwprintz(w_info, 5, 22, c_magenta, "%2d%%", p.get_int());
+            }
+        }
+        else if (line == 3) {
+            display_stat(_("Perception:"), p.per_cur, p.per_max, y, selected);
+
+            if (selected)
+            {
+                fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
+                    _("Perception is the most important stat for ranged combat.  It's also used for "
+                        "detecting traps and other things of interest."));
+                mvwprintz(w_info, 4, 1, c_magenta, _("Trap detection level:"));
+                mvwprintz(w_info, 4, 23, c_magenta, "%2d", p.get_per());
+                if (p.ranged_per_mod() > 0) {
+                    mvwprintz(w_info, 5, 1, c_magenta, _("Aiming penalty:"));
+                    mvwprintz(w_info, 5, 21, c_magenta, "%+4d", -p.ranged_per_mod());
+                }
+            }
+        }
+
+        if (selected)
+            wrefresh(w_info);
+    }
+public:
+    stats_window(catacurses::window w_this, catacurses::window w_info, const player &player)
+        : player_window(w_this, w_info, player, _("STATS")) {}
+};
+
+class encumberance_window : public player_window
+{
+private:
+    std::set<body_part> parts;
+
+    // Rescale temperature value to one that the player sees
+    static int temperature_print_rescaling(int temp)
+    {
+        return (temp / 100.0) * 2 - 100;
+    }
+
+    bool should_combine_bps(size_t l, size_t r)
+    {
+        const auto enc_data = p.get_encumbrance();
+        return enc_data[l] == enc_data[r] &&
+            temperature_print_rescaling(p.temp_conv[l]) == temperature_print_rescaling(p.temp_conv[r]);
+    }
+
+protected:
+    virtual unsigned values() override
+    {
+        return parts.size();
+    }
+
+    virtual void print_line(unsigned line, int y, bool selected) override
+    {
+        const int height = getmaxy(w_this);
+        int orig_line = line;
+
+        // fill a set with the indices of the body parts to display
+        line = std::max(0U, line);
+        std::set<int> parts;
+        // check and optionally enqueue line+0, -1, +1, -2, +2, ...
+        int off = 0; // offset from line
+        int skip[2] = {}; // how far to skip on next neg/pos jump
+        do {
+            if (!skip[off > 0] && line + off >= 0 && line + off < num_bp) { // line+off is in bounds
+                parts.insert(line + off);
+                if (line + off != (int)bp_aiOther[line + off] &&
+                    should_combine_bps(line + off, bp_aiOther[line + off])) { // part of a pair
+                    skip[(int)bp_aiOther[line + off] > line + off] = 1; // skip the next candidate in this direction
+                }
+            }
+            else {
+                skip[off > 0] = 0;
+            }
+            if (off < 0) {
+                off = -off;
+            }
+            else {
+                off = -off - 1;
+            }
+        } while (off > -num_bp && (int)parts.size() < height - 1);
+
+        std::string out;
+        /*** I chose to instead only display X+Y instead of X+Y=Z. More room was needed ***
+        *** for displaying triple digit encumbrance, due to new encumbrance system.    ***
+        *** If the player wants to see the total without having to do them maths, the  ***
+        *** armor layers ui shows everything they want :-) -Davek                      ***/
+        int row = 1;
+        const auto enc_data = p.get_encumbrance();
+        for (auto bp : parts) {
+            const encumbrance_data &e = enc_data[bp];
+            bool highlighted = (selected_clothing == nullptr) ? false :
+                (selected_clothing->covers(static_cast<body_part>(bp)));
+            bool combine = should_combine_bps(bp, bp_aiOther[bp]);
+            out.clear();
+            // limb, and possible color highlighting
+            // @todo: utf8 aware printf would be nice... this works well enough for now
+            out = body_part_name_as_heading(all_body_parts[bp], combine ? 2 : 1);
+
+            int len = 7 - utf8_width(out);
+            switch (sgn(len)) {
+            case -1:
+                out = utf8_truncate(out, 7);
+                break;
+            case 1:
+                out = out + std::string(len, ' ');
+                break;
+            }
+
+            // Two different highlighting schemes, highlight if the line is selected as per line being set.
+            // Make the text green if this part is covered by the passed in item.
+            nc_color limb_color = (orig_line == bp) ?
+                (highlighted ? h_green : h_light_gray) :
+                (highlighted ? c_green : c_light_gray);
+            mvwprintz(w_this, row, 1, limb_color, out);
+            // accumulated encumbrance from clothing, plus extra encumbrance from layering
+            wprintz(w_this, encumb_color(e.encumbrance), string_format("%3d", e.armor_encumbrance));
+            // separator in low toned color
+            wprintz(w_this, c_light_gray, "+");
+            // take into account the new encumbrance system for layers
+            wprintz(w_this, encumb_color(e.encumbrance), string_format("%-3d", e.layer_penalty));
+            // print warmth, tethered to right hand side of the window
+            out = string_format("(% 3d)", temperature_print_rescaling(p.temp_conv[bp]));
+            mvwprintz(w_this, row, getmaxx(w_this) - 6, p.bodytemp_color(bp), out);
+            row++;
+        }
+
+        if (off > -num_bp) { // not every body part fit in the window
+                             //TODO: account for skipped paired body parts in scrollbar math
+            draw_scrollbar(w_this, std::max(orig_line, 0), height - 1, num_bp, 1);
+        }
+
+    }
+public:
+    encumberance_window(catacurses::window w_this, catacurses::window w_info, const player &player)
+        : player_window(w_this, w_info, player, _("ENCUMBRANCE AND WARMTH"))
+    {
+        for (int bp = 0; bp < num_bp; bp++)
+        {
+            int other = bp_aiOther[bp];
+
+            // always insert non-paired and first in pair; second in pair only when we're not combining
+            if (other < bp && should_combine_bps(bp, other))
+                continue;
+
+            parts.insert(body_part(bp));
+        }
+    }
+};
 
 void player::disp_info()
 {
@@ -442,6 +618,7 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
     input_context ctxt( "PLAYER_INFO" );
     ctxt.register_updown();
     ctxt.register_action( "NEXT_TAB", _( "Cycle to next category" ) );
+    ctxt.register_action( "PREV_TAB", _( "Cycle to previous category" ) );
     ctxt.register_action( "QUIT" );
     ctxt.register_action( "CONFIRM", _( "Toggle skill training" ) );
     ctxt.register_action( "HELP_KEYBINDINGS" );
@@ -453,38 +630,10 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
     help_msg.clear();
     wrefresh( w_tip );
 
+    stats_window stats(w_stats, w_info, *this);
+
     // First!  Default STATS screen.
-    const std::string title_STATS = _( "STATS" );
-    center_print( w_stats, 0, c_light_gray, title_STATS );
-
-    // Stats
-    const auto display_stat = [&w_stats]( const char *name, int cur, int max, int line_n ) {
-        nc_color cstatus;
-        if( cur <= 0 ) {
-            cstatus = c_dark_gray;
-        } else if( cur < max / 2 ) {
-            cstatus = c_red;
-        } else if( cur < max ) {
-            cstatus = c_light_red;
-        } else if( cur == max ) {
-            cstatus = c_white;
-        } else if( cur < max * 1.5 ) {
-            cstatus = c_light_green;
-        } else {
-            cstatus = c_green;
-        }
-
-        mvwprintz( w_stats, line_n, 1, c_light_gray, name );
-        mvwprintz( w_stats, line_n, 18, cstatus, "%2d", cur );
-        mvwprintz( w_stats, line_n, 21, c_light_gray, "(%2d)", max );
-    };
-
-    display_stat( _( "Strength:" ),     str_cur, str_max, 2 );
-    display_stat( _( "Dexterity:" ),    dex_cur, dex_max, 3 );
-    display_stat( _( "Intelligence:" ), int_cur, int_max, 4 );
-    display_stat( _( "Perception:" ),   per_cur, per_max, 5 );
-
-    wrefresh( w_stats );
+    stats.print();
 
     // Next, draw encumbrance.
     const std::string title_ENCUMB = _( "ENCUMBRANCE AND WARMTH" );
@@ -680,82 +829,29 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
 
     catacurses::refresh();
 
-    int curtab = 1;
+    int curtab = 0;
     size_t min, max;
     line = 0;
     bool done = false;
     size_t half_y = 0;
+
+    auto switch_category = [&]() {
+        line = 0;
+        if ( action == "NEXT_TAB" ) {
+            curtab++;
+        } else {
+            curtab--;
+        }
+        curtab %= 5;
+    };
 
     // Initial printing is DONE.  Now we give the player a chance to scroll around
     // and "hover" over different items for more info.
     do {
         werase( w_info );
         switch( curtab ) {
-            case 1: // Stats tab
-                mvwprintz( w_stats, 0, 0, h_light_gray, header_spaces.c_str() );
-                center_print( w_stats, 0, h_light_gray, title_STATS );
-
-                // Clear bonus/penalty menu.
-                mvwprintz( w_stats, 6, 0, c_light_gray, "%26s", "" );
-                mvwprintz( w_stats, 7, 0, c_light_gray, "%26s", "" );
-                mvwprintz( w_stats, 8, 0, c_light_gray, "%26s", "" );
-
-                if( line == 0 ) {
-                    // Display information on player strength in appropriate window
-                    mvwprintz( w_stats, 2, 1, h_light_gray, _( "Strength:" ) );
-                    fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
-                                    _( "Strength affects your melee damage, the amount of weight you can carry, your total HP, "
-                                       "your resistance to many diseases, and the effectiveness of actions which require brute force." ) );
-                    mvwprintz( w_info, 3, 1, c_magenta, _( "Base HP:" ) );
-                    mvwprintz( w_info, 3, 22, c_magenta, "%3d", hp_max[1] );
-                    if( get_option<std::string>( "USE_METRIC_WEIGHTS" ) == "kg" ) {
-                        mvwprintz( w_info, 4, 1, c_magenta, _( "Carry weight(kg):" ) );
-                    } else {
-                        mvwprintz( w_info, 4, 1, c_magenta, _( "Carry weight(lbs):" ) );
-                    }
-                    mvwprintz( w_info, 4, 21, c_magenta, "%4.1f", convert_weight( weight_capacity() ) );
-                    mvwprintz( w_info, 5, 1, c_magenta, _( "Melee damage:" ) );
-                    mvwprintz( w_info, 5, 22, c_magenta, "%3.1f", bonus_damage( false ) );
-
-                } else if( line == 1 ) {
-                    // Display information on player dexterity in appropriate window
-                    mvwprintz( w_stats, 3, 1, h_light_gray, _( "Dexterity:" ) );
-                    fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
-                                    _( "Dexterity affects your chance to hit in melee combat, helps you steady your "
-                                       "gun for ranged combat, and enhances many actions that require finesse." ) );
-                    mvwprintz( w_info, 3, 1, c_magenta, _( "Melee to-hit bonus:" ) );
-                    mvwprintz( w_info, 3, 38, c_magenta, "%+.1lf", get_hit_base() );
-                    mvwprintz( w_info, 4, 1, c_magenta, _( "Ranged penalty:" ) );
-                    mvwprintz( w_info, 4, 38, c_magenta, "%+3d", -( abs( ranged_dex_mod() ) ) );
-                    mvwprintz( w_info, 5, 1, c_magenta, _( "Throwing penalty per target's dodge:" ) );
-                    mvwprintz( w_info, 5, 38, c_magenta, "%+3d", throw_dispersion_per_dodge( false ) );
-                } else if( line == 2 ) {
-                    // Display information on player intelligence in appropriate window
-                    mvwprintz( w_stats, 4, 1, h_light_gray, _( "Intelligence:" ) );
-                    fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
-                                    _( "Intelligence is less important in most situations, but it is vital for more complex tasks like "
-                                       "electronics crafting.  It also affects how much skill you can pick up from reading a book." ) );
-                    mvwprintz( w_info, 3, 1, c_magenta, _( "Read times:" ) );
-                    mvwprintz( w_info, 3, 21, c_magenta, "%3d%%", read_speed( false ) );
-                    mvwprintz( w_info, 4, 1, c_magenta, _( "Skill rust:" ) );
-                    mvwprintz( w_info, 4, 22, c_magenta, "%2d%%", rust_rate( false ) );
-                    mvwprintz( w_info, 5, 1, c_magenta, _( "Crafting bonus:" ) );
-                    mvwprintz( w_info, 5, 22, c_magenta, "%2d%%", get_int() );
-                } else if( line == 3 ) {
-                    // Display information on player perception in appropriate window
-                    mvwprintz( w_stats, 5, 1, h_light_gray, _( "Perception:" ) );
-                    fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
-                                    _( "Perception is the most important stat for ranged combat.  It's also used for "
-                                       "detecting traps and other things of interest." ) );
-                    mvwprintz( w_info, 4, 1, c_magenta, _( "Trap detection level:" ) );
-                    mvwprintz( w_info, 4, 23, c_magenta, "%2d", get_per() );
-                    if( ranged_per_mod() > 0 ) {
-                        mvwprintz( w_info, 5, 1, c_magenta, _( "Aiming penalty:" ) );
-                        mvwprintz( w_info, 5, 21, c_magenta, "%+4d", -ranged_per_mod() );
-                    }
-                }
-                wrefresh( w_stats );
-                wrefresh( w_info );
+            case 0: // Stats tab
+                stats.print(line);
 
                 action = ctxt.handle_input();
                 if( action == "DOWN" ) {
@@ -769,23 +865,16 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
                     } else {
                         line--;
                     }
-                } else if( action == "NEXT_TAB" ) {
-                    mvwprintz( w_stats, 0, 0, c_light_gray, header_spaces.c_str() );
-                    center_print( w_stats, 0, c_light_gray, title_STATS );
-                    wrefresh( w_stats );
-                    line = 0;
-                    curtab++;
+                } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
+                    switch_category();
+                    stats.print();
                 } else if( action == "QUIT" ) {
                     done = true;
                 }
-                mvwprintz( w_stats, 2, 1, c_light_gray, _( "Strength:" ) );
-                mvwprintz( w_stats, 3, 1, c_light_gray, _( "Dexterity:" ) );
-                mvwprintz( w_stats, 4, 1, c_light_gray, _( "Intelligence:" ) );
-                mvwprintz( w_stats, 5, 1, c_light_gray, _( "Perception:" ) );
-                wrefresh( w_stats );
                 break;
-            case 2: { // Encumbrance tab
+            case 1: { // Encumbrance tab
                 werase( w_encumb );
+                mvwprintz( w_encumb, 0, 0, h_light_gray, header_spaces );
                 center_print( w_encumb, 0, h_light_gray, title_ENCUMB );
                 print_encumbrance( w_encumb, line );
                 wrefresh( w_encumb );
@@ -819,18 +908,14 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
                             line--; // unpaired or unequal
                         }
                     }
-                } else if( action == "NEXT_TAB" ) {
-                    mvwprintz( w_encumb, 0, 0, c_light_gray, header_spaces.c_str() );
-                    center_print( w_encumb, 0, c_light_gray, title_ENCUMB );
-                    wrefresh( w_encumb );
-                    line = 0;
-                    curtab++;
+                } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
+                    switch_category();
                 } else if( action == "QUIT" ) {
                     done = true;
                 }
                 break;
             }
-            case 4: // Traits tab
+            case 3: // Traits tab
                 werase( w_traits );
                 mvwprintz( w_traits, 0, 0, h_light_gray, header_spaces );
                 center_print( w_traits, 0, h_light_gray, title_TRAITS );
@@ -876,25 +961,14 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
                     if( line > 0 ) {
                         line--;
                     }
-                } else if( action == "NEXT_TAB" ) {
-                    mvwprintz( w_traits, 0, 0, c_light_gray, header_spaces.c_str() );
-                    center_print( w_traits, 0, c_light_gray, title_TRAITS );
-                    for( size_t i = 0; i < traitslist.size() && i < trait_win_size_y; i++ ) {
-                        const auto &mdata = traitslist[i].obj();
-                        mvwprintz( w_traits, int( i + 1 ), 1, c_black, "                         " );
-                        const auto color = mdata.get_display_color();
-                        trim_and_print( w_traits, int( i + 1 ), 1, getmaxx( w_traits ) - 1,
-                                        color, mdata.name );
-                    }
-                    wrefresh( w_traits );
-                    line = 0;
-                    curtab++;
+                } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
+                    switch_category();
                 } else if( action == "QUIT" ) {
                     done = true;
                 }
                 break;
 
-            case 5: // Effects tab
+            case 4: // Effects tab
                 mvwprintz( w_effects, 0, 0, h_light_gray, header_spaces.c_str() );
                 center_print( w_effects, 0, h_light_gray, title_EFFECTS );
                 half_y = effect_win_size_y / 2;
@@ -935,21 +1009,14 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
                     if( line > 0 ) {
                         line--;
                     }
-                } else if( action == "NEXT_TAB" ) {
-                    mvwprintz( w_effects, 0, 0, c_light_gray, header_spaces.c_str() );
-                    center_print( w_effects, 0, c_light_gray, title_EFFECTS );
-                    for( size_t i = 0; i < effect_name.size() && i < 7; i++ ) {
-                        mvwprintz( w_effects, int( i + 1 ), 0, c_light_gray, effect_name[i] );
-                    }
-                    wrefresh( w_effects );
-                    line = 0;
-                    curtab = 1;
+                } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
+                    switch_category();
                 } else if( action == "QUIT" ) {
                     done = true;
                 }
                 break;
 
-            case 3: // Skills tab
+            case 2: // Skills tab
                 mvwprintz( w_skills, 0, 0, h_light_gray, header_spaces.c_str() );
                 center_print( w_skills, 0, h_light_gray, title_SKILLS );
                 half_y = skill_win_size_y / 2;
@@ -1033,39 +1100,8 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
                     if( line > 0 ) {
                         line--;
                     }
-                } else if( action == "NEXT_TAB" ) {
-                    werase( w_skills );
-                    mvwprintz( w_skills, 0, 0, c_light_gray, header_spaces.c_str() );
-                    center_print( w_skills, 0, c_light_gray, title_SKILLS );
-                    for( size_t i = 0; i < skillslist.size() && i < size_t( skill_win_size_y ); i++ ) {
-                        const Skill *thisSkill = skillslist[i];
-                        const SkillLevel &level = get_skill_level_object( thisSkill->ident() );
-                        bool can_train = level.can_train();
-                        bool isLearning = level.isTraining();
-                        bool rusting = level.isRusting();
-
-                        nc_color cstatus;
-                        if( rusting ) {
-                            cstatus = isLearning ? c_light_red : c_red;
-                        } else if( !can_train ) {
-                            cstatus = c_white;
-                        } else {
-                            cstatus = isLearning ? c_light_blue : c_blue;
-                        }
-
-                        mvwprintz( w_skills, i + 1,  1, cstatus, "%s:", thisSkill->name().c_str() );
-
-                        if( thisSkill->ident() == skill_id( "dodge" ) ) {
-                            mvwprintz( w_skills, i + 1, 15, cstatus, "%-.1f/%-2d(%2d%%)",
-                                       get_dodge(), level.level(), level.exercise() < 0 ? 0 : level.exercise() );
-                        } else {
-                            mvwprintz( w_skills, i + 1, 19, cstatus, "%-2d(%2d%%)", level.level(),
-                                       ( level.exercise() <  0 ? 0 : level.exercise() ) );
-                        }
-                    }
-                    wrefresh( w_skills );
-                    line = 0;
-                    curtab++;
+                } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
+                    switch_category();
                 } else if( action == "CONFIRM" ) {
                     get_skill_level_object( selectedSkill->ident() ).toggleTraining();
                 } else if( action == "QUIT" ) {
