@@ -13,6 +13,7 @@
 #include "skill.h"
 
 #include <algorithm>
+#include <deque>
 
 const skill_id skill_swimming( "swimming" );
 
@@ -126,19 +127,37 @@ std::string get_encumbrance_description( const player &p, body_part bp, bool com
 class player_window {
 private:
     const std::string title;
+    catacurses::window w_info;
 
 protected:
     catacurses::window w_this;
-    catacurses::window w_info;
     const player &p;
+
+    void info_print_folded(const std::string &message)
+    {
+        fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, message);
+    }
+
+    template<typename ...Args>
+    void info_print_label_value(int y, const std::string &label, int value_x, const std::string &value_format, Args &&... value_args)
+    {
+        mvwprintz(w_info, y, 1, c_magenta, label);
+        mvwprintz(w_info, y, value_x, c_magenta, value_format.c_str(), std::forward<Args>(value_args)...);
+    }
 
     virtual void print_line(unsigned line, int y, bool selected) = 0;
 
 public:
     virtual int values() = 0;
 
-    player_window(catacurses::window w_this, catacurses::window w_info, const player &player, const std::string title)
-        : w_this(w_this), w_info(w_info), title(title), p(player) {}
+    player_window(const player &player, const std::string title)
+        : w_this(), w_info(), title(title), p(player) {}
+
+    void set_windows(catacurses::window w_this, catacurses::window w_info)
+    {
+        this->w_this = w_this;
+        this->w_info = w_info;
+    }
 
     void print(int selected_line = - 1) 
     {
@@ -221,20 +240,13 @@ protected:
 
             if (selected)
             {
-                fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
+                info_print_folded(
                     _("Strength affects your melee damage, the amount of weight you can carry, your total HP, "
                         "your resistance to many diseases, and the effectiveness of actions which require brute force."));
-                mvwprintz(w_info, 3, 1, c_magenta, _("Base HP:"));
-                mvwprintz(w_info, 3, 22, c_magenta, "%3d", p.hp_max[1]);
-                if (get_option<std::string>("USE_METRIC_WEIGHTS") == "kg") {
-                    mvwprintz(w_info, 4, 1, c_magenta, _("Carry weight(kg):"));
-                }
-                else {
-                    mvwprintz(w_info, 4, 1, c_magenta, _("Carry weight(lbs):"));
-                }
-                mvwprintz(w_info, 4, 21, c_magenta, "%4.1f", convert_weight(p.weight_capacity()));
-                mvwprintz(w_info, 5, 1, c_magenta, _("Melee damage:"));
-                mvwprintz(w_info, 5, 22, c_magenta, "%3.1f", p.bonus_damage(false));
+                info_print_label_value(3, _("Base HP:"), 22, "%3d", p.hp_max[1]);
+                bool metric = get_option<std::string>("USE_METRIC_WEIGHTS") == "kg";
+                info_print_label_value(4, metric ? _("Carry weight (kg):") : _("Carry weight (lbs):"), 21, "%4.1f", convert_weight(p.weight_capacity()));
+                info_print_label_value(5, _("Melee damage:"), 22, "%3.1f", p.bonus_damage(false));
             }
         }
         else if (line == 1) {
@@ -242,15 +254,12 @@ protected:
 
             if (selected)
             {
-                fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
+                info_print_folded(
                     _("Dexterity affects your chance to hit in melee combat, helps you steady your "
                         "gun for ranged combat, and enhances many actions that require finesse."));
-                mvwprintz(w_info, 3, 1, c_magenta, _("Melee to-hit bonus:"));
-                mvwprintz(w_info, 3, 38, c_magenta, "%+.1lf", p.get_hit_base());
-                mvwprintz(w_info, 4, 1, c_magenta, _("Ranged penalty:"));
-                mvwprintz(w_info, 4, 38, c_magenta, "%+3d", -(abs(p.ranged_dex_mod())));
-                mvwprintz(w_info, 5, 1, c_magenta, _("Throwing penalty per target's dodge:"));
-                mvwprintz(w_info, 5, 38, c_magenta, "%+3d", p.throw_dispersion_per_dodge(false));
+                info_print_label_value(3, _("Melee to-hit bonus:"), 38, "%+.1lf", p.get_hit_base());
+                info_print_label_value(4, _("Ranged penalty:"), 38, "%+3d", -(abs(p.ranged_dex_mod())));
+                info_print_label_value(5, _("Throwing penalty per target's dodge:"), 38, "%+3d", p.throw_dispersion_per_dodge(false));
             }
         }
         else if (line == 2) {
@@ -258,15 +267,12 @@ protected:
 
             if (selected)
             {
-                fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
+                info_print_folded(
                     _("Intelligence is less important in most situations, but it is vital for more complex tasks like "
                         "electronics crafting.  It also affects how much skill you can pick up from reading a book."));
-                mvwprintz(w_info, 3, 1, c_magenta, _("Read times:"));
-                mvwprintz(w_info, 3, 21, c_magenta, "%3d%%", p.read_speed(false));
-                mvwprintz(w_info, 4, 1, c_magenta, _("Skill rust:"));
-                mvwprintz(w_info, 4, 22, c_magenta, "%2d%%", p.rust_rate(false));
-                mvwprintz(w_info, 5, 1, c_magenta, _("Crafting bonus:"));
-                mvwprintz(w_info, 5, 22, c_magenta, "%2d%%", p.get_int());
+                info_print_label_value(3,_("Read times:"), 21, "%3d%%", p.read_speed(false));
+                info_print_label_value(4,_("Skill rust:"), 22, "%2d%%", p.rust_rate(false));
+                info_print_label_value(5, _("Crafting bonus:"), 22, "%2d%%", p.get_int());
             }
         }
         else if (line == 3) {
@@ -274,14 +280,12 @@ protected:
 
             if (selected)
             {
-                fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta,
+                info_print_folded(
                     _("Perception is the most important stat for ranged combat.  It's also used for "
                         "detecting traps and other things of interest."));
-                mvwprintz(w_info, 4, 1, c_magenta, _("Trap detection level:"));
-                mvwprintz(w_info, 4, 23, c_magenta, "%2d", p.get_per());
+                info_print_label_value(4, _("Trap detection level:"), 23, "%2d", p.get_per());
                 if (p.ranged_per_mod() > 0) {
-                    mvwprintz(w_info, 5, 1, c_magenta, _("Aiming penalty:"));
-                    mvwprintz(w_info, 5, 21, c_magenta, "%+4d", -p.ranged_per_mod());
+                    info_print_label_value(5, _("Aiming penalty:"), 21, "%+4d", -p.ranged_per_mod());
                 }
             }
         }
@@ -292,8 +296,7 @@ public:
         return 4;
     }
 
-    stats_window(catacurses::window w_this, catacurses::window w_info, const player &player)
-        : player_window(w_this, w_info, player, _("STATS")) {}
+    stats_window(const player &player) : player_window(player, _("STATS")) {}
 };
 
 class encumberance_window : public player_window
@@ -356,9 +359,7 @@ protected:
 
         if (selected)
         {
-            std::string s = get_encumbrance_description(p, bp, combine);
-            fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, s);
-            wrefresh(w_info);
+            info_print_folded(get_encumbrance_description(p, bp, combine));
         }
     }
 
@@ -368,8 +369,8 @@ public:
         return parts.size();
     }
 
-    encumberance_window(catacurses::window w_this, catacurses::window w_info, const player &player, item *selected_clothing = nullptr)
-        : player_window(w_this, w_info, player, _("ENCUMBRANCE AND WARMTH")), selected_clothing(selected_clothing)
+    encumberance_window(const player &player, item *selected_clothing = nullptr)
+        : player_window(player, _("ENCUMBRANCE AND WARMTH")), selected_clothing(selected_clothing)
     {
         for (int bp = 0; bp < num_bp; bp++)
         {
@@ -386,7 +387,9 @@ public:
 
 void player::print_encumbrance(const catacurses::window &win, item *selected_clothing) const
 {
-    encumberance_window(win, catacurses::window(), *this, selected_clothing).print();
+    encumberance_window encumberance(*this, selected_clothing);
+    encumberance.set_windows(win, catacurses::window());
+    encumberance.print();
 }
 
 class traits_window : public player_window
@@ -404,7 +407,7 @@ protected:
 
         if (selected)
         {
-            fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, string_format(
+            info_print_folded(string_format(
                 "<color_%s>%s</color>: %s", string_from_color(mdata.get_display_color()),
                 mdata.name, traits[line]->description));
         }
@@ -415,92 +418,334 @@ public:
         return traits.size();
     }
 
-    traits_window(catacurses::window w_this, catacurses::window w_info, const player &player, std::vector<trait_id> traits)
-        : player_window(w_this, w_info, player, _("TRAITS")), traits(traits)
+    traits_window(const player &player)
+        : player_window(player, _("TRAITS")), traits(p.get_mutations())
     {
         std::sort(this->traits.begin(), this->traits.end(), trait_display_sort);
     }
 };
 
-
-void player::disp_info()
+class effects_window : public player_window
 {
-    unsigned line;
-    std::vector<std::string> effect_name;
-    std::vector<std::string> effect_text;
-    std::string tmp = "";
-    for( auto &elem : *effects ) {
-        for( auto &_effect_it : elem.second ) {
-            tmp = _effect_it.second.disp_name();
-            if( !tmp.empty() ) {
-                effect_name.push_back( tmp );
-                effect_text.push_back( _effect_it.second.disp_desc() );
+private:
+    struct effect
+    {
+        std::string name;
+        std::string text;
+    };
+
+    std::vector<effect> effects;
+protected:
+    virtual void print_line(unsigned line, int y, bool selected) override
+    {
+        trim_and_print(w_this, y, 1, getmaxx(w_this) - 1, selected ? h_light_gray : c_light_gray, effects[line].name);
+
+        if (selected)
+        {
+            info_print_folded(effects[line].text);
+        }
+    }
+public:
+    virtual int values() override
+    {
+        return effects.size();
+    }
+
+    effects_window(const player &player, const effects_map &effects_map) : player_window(player, _("EFFECTS"))
+    {
+        for (auto &elem : effects_map) {
+            for (auto &effect : elem.second) {
+                std::string name = effect.second.disp_name();
+                if (!name.empty()) {
+                    effects.push_back({ name, effect.second.disp_desc() });
+                }
+            }
+        }
+
+        if (p.get_perceived_pain() > 0) {
+            const auto ppen = p.get_pain_penalty();
+            std::stringstream pain_text;
+            if (ppen.strength > 0) {
+                pain_text << _("Strength") << " -" << ppen.strength << "   ";
+            }
+            if (ppen.dexterity > 0) {
+                pain_text << _("Dexterity") << " -" << ppen.dexterity << "   ";
+            }
+            if (ppen.intelligence > 0) {
+                pain_text << _("Intelligence") << " -" << ppen.intelligence << "   ";
+            }
+            if (ppen.perception > 0) {
+                pain_text << _("Perception") << " -" << ppen.perception << "   ";
+            }
+            if (ppen.speed > 0) {
+                pain_text << _("Speed") << " -" << ppen.speed << "%   ";
+            }
+            effects.push_back({ _("Pain") , pain_text.str() });
+        }
+
+        if ((p.has_trait(trait_id("TROGLO")) && g->is_in_sunlight(p.pos()) &&
+            g->weather == WEATHER_SUNNY) ||
+            (p.has_trait(trait_id("TROGLO2")) && g->is_in_sunlight(p.pos()) &&
+                g->weather != WEATHER_SUNNY)) {
+            effects.push_back({ _("In Sunlight"), _("The sunlight irritates you.\n\
+Strength - 1;    Dexterity - 1;    Intelligence - 1;    Perception - 1") });
+        }
+        else if (p.has_trait(trait_id("TROGLO2")) && g->is_in_sunlight(p.pos())) {
+            effects.push_back({ _("In Sunlight"),_("The sunlight irritates you badly.\n\
+Strength - 2;    Dexterity - 2;    Intelligence - 2;    Perception - 2") });
+        }
+        else if (p.has_trait(trait_id("TROGLO3")) && g->is_in_sunlight(p.pos())) {
+            effects.push_back({ _("In Sunlight"), _("The sunlight irritates you terribly.\n\
+Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4") });
+        }
+
+        for (auto &elem : p.addictions) {
+            if (elem.sated < 0_turns && elem.intensity >= MIN_ADDICTION_LEVEL) {
+                effects.push_back({ addiction_name(elem), addiction_text(elem) });
             }
         }
     }
-    if( get_perceived_pain() > 0 ) {
-        effect_name.push_back( _( "Pain" ) );
-        const auto ppen = get_pain_penalty();
-        std::stringstream pain_text;
-        if( ppen.strength > 0 ) {
-            pain_text << _( "Strength" ) << " -" << ppen.strength << "   ";
+};
+
+class skills_window : public player_window
+{
+private:
+    std::vector<const Skill*> skills;
+protected:
+    virtual void print_line(unsigned line, int y, bool selected) override
+    {
+        auto skill = skills[line];
+        const SkillLevel &level = p.get_skill_level_object(skill->ident());
+
+        const bool can_train = level.can_train();
+        const bool training = level.isTraining();
+        const bool rusting = level.isRusting();
+        int exercise = level.exercise();
+
+        nc_color label_color;
+        if (!can_train) {
+            label_color = rusting ? c_light_red : c_white;
         }
-        if( ppen.dexterity > 0 ) {
-            pain_text << _( "Dexterity" ) << " -" << ppen.dexterity << "   ";
+        else if (exercise >= 100) {
+            label_color = training ? c_pink : c_magenta;
         }
-        if( ppen.intelligence > 0 ) {
-            pain_text << _( "Intelligence" ) << " -" << ppen.intelligence << "   ";
+        else if (rusting) {
+            label_color = training ? c_light_red : c_red;
         }
-        if( ppen.perception > 0 ) {
-            pain_text << _( "Perception" ) << " -" << ppen.perception << "   ";
+        else {
+            label_color = training ? c_light_blue : c_blue;
         }
-        if( ppen.speed > 0 ) {
-            pain_text << _( "Speed" ) << " -" << ppen.speed << "%   ";
+
+        int level_num = level.level();
+
+        // TODO: this skill list here is used in other places as well. Useless redundancy and
+        // dependency. Maybe change it into a flag of the skill that indicates it's a skill used
+        // by the bionic?
+        static const std::array<skill_id, 5> cqb_skills = { {
+                skill_id("melee"), skill_id("unarmed"), skill_id("cutting"),
+                skill_id("bashing"), skill_id("stabbing"),
+            }
+        };
+        if (p.has_active_bionic(bionic_id("bio_cqb")) &&
+            std::find(cqb_skills.begin(), cqb_skills.end(), skill->ident()) != cqb_skills.end()) {
+            level_num = 5;
+            exercise = 0;
+            label_color = c_yellow;
         }
-        effect_text.push_back( pain_text.str() );
+
+        nc_color value_color = label_color;
+
+        if (selected) {
+            label_color = hilite(label_color);
+        }
+
+        mvwprintz(w_this, y, 1, label_color, skill->name());
+
+        if (skill->ident() == skill_id("dodge")) {
+            mvwprintz(w_this, y, 14, value_color, "%4.1f/%-2d(%2d%%)",
+                p.get_dodge(), level_num, exercise < 0 ? 0 : exercise);
+        }
+        else {
+            mvwprintz(w_this, y, 19, value_color, "%-2d(%2d%%)", level_num,
+                exercise < 0 ? 0 : exercise);
+        }
+
+        if (selected)
+        {
+            info_print_folded(skill->description());
+        }
+    }
+public:
+    virtual int values() override
+    {
+        return skills.size();
     }
 
-    if( ( has_trait( trait_id( "TROGLO" ) ) && g->is_in_sunlight( pos() ) &&
-          g->weather == WEATHER_SUNNY ) ||
-        ( has_trait( trait_id( "TROGLO2" ) ) && g->is_in_sunlight( pos() ) &&
-          g->weather != WEATHER_SUNNY ) ) {
-        effect_name.push_back( _( "In Sunlight" ) );
-        effect_text.push_back( _( "The sunlight irritates you.\n\
-Strength - 1;    Dexterity - 1;    Intelligence - 1;    Perception - 1" ) );
-    } else if( has_trait( trait_id( "TROGLO2" ) ) && g->is_in_sunlight( pos() ) ) {
-        effect_name.push_back( _( "In Sunlight" ) );
-        effect_text.push_back( _( "The sunlight irritates you badly.\n\
-Strength - 2;    Dexterity - 2;    Intelligence - 2;    Perception - 2" ) );
-    } else if( has_trait( trait_id( "TROGLO3" ) ) && g->is_in_sunlight( pos() ) ) {
-        effect_name.push_back( _( "In Sunlight" ) );
-        effect_text.push_back( _( "The sunlight irritates you terribly.\n\
-Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
+    const Skill* get_skill(unsigned line)
+    {
+        return skills[line];
     }
 
-    for( auto &elem : addictions ) {
-        if( elem.sated < 0_turns && elem.intensity >= MIN_ADDICTION_LEVEL ) {
-            effect_name.push_back( addiction_name( elem ) );
-            effect_text.push_back( addiction_text( elem ) );
+    skills_window(const player &player)
+        : player_window(player, _("SKILLS"))
+    {
+        skills = Skill::get_skills_sorted_by([&](Skill const & a, Skill const & b) {
+            int const level_a = p.get_skill_level_object(a.ident()).exercised_level();
+            int const level_b = p.get_skill_level_object(b.ident()).exercised_level();
+            return level_a > level_b || (level_a == level_b && a.name() < b.name());
+        });
+    }
+};
+
+class speed_window : public player_window
+{
+private:
+    struct modifier
+    {
+        std::string label;
+        int value;
+    };
+
+    std::vector<modifier> modifiers;
+    int runcost;
+    int newmoves;
+protected:
+    virtual void print_line(unsigned line, int y, bool selected) override
+    {
+        if (line == 0 || line == 1) {
+            std::string label;
+            int value;
+            nc_color col;
+
+            if (line == 0)
+            {
+                label = _("Base Move Cost");
+                value = runcost;
+                col = runcost <= 100 ? c_green : c_red;
+            }
+            else
+            {
+                label = _("Current Speed");
+                value = newmoves;
+                col = newmoves >= 100 ? c_green : c_red;
+            }
+
+            mvwprintz(w_this, y, 1, c_light_gray, label);
+            mvwprintz(w_this, y, 21, col, "%3d", value);
+        }
+        else
+        {
+            auto modifier = modifiers[line - 2];
+            nc_color color = modifier.value > 0 ? c_green : c_red;
+            mvwprintz(w_this, y, 1, color, modifier.label);
+            mvwprintz(w_this, y, 21, color, "%c%2d%%", modifier.value > 0 ? '+' : '-', abs(modifier.value));
         }
     }
+public:
+    virtual int values() override
+    {
+        return modifiers.size() + 2;
+    }
 
+    void add_modifier(const std::string &label, int value)
+    {
+        if (value == 0)
+            return;
+
+        modifiers.push_back({ label, value });
+    }
+
+    speed_window(const player &player, const effects_map &effects_map) : player_window(player, _("SPEED"))
+    {
+        newmoves = p.get_speed();
+
+        if (p.weight_carried() > p.weight_capacity()) {
+            int pen = -25 * (p.weight_carried() - p.weight_capacity()) / (p.weight_capacity());
+            add_modifier(_("Overburdened"), pen);
+        }
+
+        add_modifier(_("Pain"), -p.get_pain_penalty().speed);
+        add_modifier(_("Thirst"), p.thirst_speed_penalty(p.get_thirst()));
+        add_modifier(_("Hunger"), p.hunger_speed_penalty(p.get_hunger()));
+
+        if (p.has_trait(trait_id("SUNLIGHT_DEPENDENT")) && !g->is_in_sunlight(p.pos())) {
+            add_modifier(_("Out of Sunlight"), g->light_level(p.posz()) >= 12 ? -5 : -10);
+        }
+        if (p.has_trait(trait_id("COLDBLOOD4")) && g->get_temperature(g->u.pos()) > 65) {
+            int pen = (g->get_temperature(g->u.pos()) - 65) / 2;
+            add_modifier(_("Cold-Blooded"), pen);
+        }
+        if ((p.has_trait(trait_id("COLDBLOOD")) || p.has_trait(trait_id("COLDBLOOD2")) ||
+            p.has_trait(trait_id("COLDBLOOD3")) || p.has_trait(trait_id("COLDBLOOD4"))) &&
+            g->get_temperature(g->u.pos()) < 65) {
+            int pen;
+            if (p.has_trait(trait_id("COLDBLOOD3")) || p.has_trait(trait_id("COLDBLOOD4"))) {
+                pen = (65 - g->get_temperature(g->u.pos())) / 2;
+            }
+            else if (p.has_trait(trait_id("COLDBLOOD2"))) {
+                pen = (65 - g->get_temperature(g->u.pos())) / 3;
+            }
+            else {
+                pen = (65 - g->get_temperature(g->u.pos())) / 5;
+            }
+            add_modifier(_("Cold-Blooded"), -pen);
+        }
+
+        std::map<std::string, int> speed_effects;
+        std::string dis_text = "";
+        for (auto &elem : effects_map) {
+            for (auto &_effect_it : elem.second) {
+                auto &it = _effect_it.second;
+                bool reduced = p.resists_effect(it);
+                int move_adjust = it.get_mod("SPEED", reduced);
+                if (move_adjust != 0) {
+                    dis_text = it.get_speed_name();
+                    speed_effects[dis_text] += move_adjust;
+                }
+            }
+        }
+
+        for (auto &speed_effect : speed_effects) {
+            nc_color col = (speed_effect.second > 0 ? c_green : c_red);
+            add_modifier(_(speed_effect.first.c_str()), speed_effect.second);
+        }
+
+        int quick_bonus = int(newmoves - (newmoves / 1.1));
+        int bio_speed_bonus = quick_bonus;
+        if (p.has_trait(trait_id("QUICK")) && p.has_bionic(bionic_id("bio_speed"))) {
+            bio_speed_bonus = int(newmoves / 1.1 - (newmoves / 1.1 / 1.1));
+            std::swap(quick_bonus, bio_speed_bonus);
+        }
+        if (p.has_trait(trait_id("QUICK"))) {
+            add_modifier(_("Quick"), quick_bonus);
+        }
+        if (p.has_bionic(bionic_id("bio_speed"))) {
+            add_modifier(_("Bionic Speed"), bio_speed_bonus);
+        }
+
+        runcost = p.run_cost(100);
+    }
+};
+
+void player::disp_info()
+{
     unsigned maxy = unsigned( TERMY );
 
-    std::vector<trait_id> traitslist = get_mutations();
+    traits_window traits(*this);
+    effects_window effects(*this, *this->effects);
+    skills_window skills(*this);
 
-    const auto skillslist = Skill::get_skills_sorted_by( [&]( Skill const & a, Skill const & b ) {
-        int const level_a = get_skill_level_object( a.ident() ).exercised_level();
-        int const level_b = get_skill_level_object( b.ident() ).exercised_level();
-        return level_a > level_b || ( level_a == level_b && a.name() < b.name() );
-    } );
-
-    unsigned effect_win_size_y = 1 + unsigned( effect_name.size() );
-    unsigned trait_win_size_y = 1 + unsigned( traitslist.size() );
-    unsigned skill_win_size_y = 1 + skillslist.size();
+    unsigned effect_win_size_y = 1 + unsigned(effects.values() );
+    unsigned trait_win_size_y = 1 + unsigned( traits.values() );
+    unsigned skill_win_size_y = 1 + unsigned( skills.values() );
     unsigned info_win_size_y = 6;
 
     unsigned infooffsetytop = 11;
     unsigned infooffsetybottom = infooffsetytop + 1 + info_win_size_y;
+
+    if (effect_win_size_y + infooffsetybottom > maxy) {
+        effect_win_size_y = maxy - infooffsetybottom;
+    }
 
     if( trait_win_size_y + infooffsetybottom > maxy ) {
         trait_win_size_y = maxy - infooffsetybottom;
@@ -658,418 +903,78 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
     help_msg.clear();
     wrefresh( w_tip );
 
-    // First!  Default STATS screen.
-    stats_window stats(w_stats, w_info, *this);
+    stats_window stats(*this);
+    stats.set_windows(w_stats, w_info);
     stats.print();
 
-    // Next, draw encumbrance.
-    encumberance_window encumberance(w_encumb, w_info, *this);
+    encumberance_window encumberance(*this);
+    encumberance.set_windows(w_encumb, w_info);
     encumberance.print();
 
-    // Next, draw traits.
-    traits_window traits(w_traits, w_info, *this, traitslist);
+    traits.set_windows(w_traits, w_info);
     traits.print();
 
-    // Next, draw effects.
-    const std::string title_EFFECTS = _( "EFFECTS" );
-    center_print( w_effects, 0, c_light_gray, title_EFFECTS );
-    for( size_t i = 0; i < effect_name.size() && i < effect_win_size_y; i++ ) {
-        trim_and_print( w_effects, int( i ) + 1, 0, getmaxx( w_effects ) - 1, c_light_gray,
-                        effect_name[i] );
-    }
-    wrefresh( w_effects );
+    effects.set_windows(w_effects, w_info);
+    effects.print();
 
-    // Next, draw skills.
-    line = 1;
+    skills.set_windows(w_skills, w_info);
+    skills.print();
 
-    const std::string title_SKILLS = _( "SKILLS" );
-    center_print( w_skills, 0, c_light_gray, title_SKILLS );
-
-    for( auto &elem : skillslist ) {
-        const SkillLevel &level = get_skill_level_object( elem->ident() );
-
-        // Default to not training and not rusting
-        nc_color text_color = c_blue;
-        bool not_capped = level.can_train();
-        bool training = level.isTraining();
-        bool rusting = level.isRusting();
-
-        if( training && rusting ) {
-            text_color = c_light_red;
-        } else if( training && not_capped ) {
-            text_color = c_light_blue;
-        } else if( rusting ) {
-            text_color = c_red;
-        } else if( !not_capped ) {
-            text_color = c_white;
-        }
-
-        int level_num = level.level();
-        int exercise = level.exercise();
-
-        // TODO: this skill list here is used in other places as well. Useless redundancy and
-        // dependency. Maybe change it into a flag of the skill that indicates it's a skill used
-        // by the bionic?
-        static const std::array<skill_id, 5> cqb_skills = { {
-                skill_id( "melee" ), skill_id( "unarmed" ), skill_id( "cutting" ),
-                skill_id( "bashing" ), skill_id( "stabbing" ),
-            }
-        };
-        if( has_active_bionic( bionic_id( "bio_cqb" ) ) &&
-            std::find( cqb_skills.begin(), cqb_skills.end(), elem->ident() ) != cqb_skills.end() ) {
-            level_num = 5;
-            exercise = 0;
-            text_color = c_yellow;
-        }
-
-        if( line < skill_win_size_y + 1 ) {
-            mvwprintz( w_skills, line, 1, text_color, "%s:", ( elem )->name().c_str() );
-
-            if( ( elem )->ident() == skill_id( "dodge" ) ) {
-                mvwprintz( w_skills, line, 15, text_color, "%-.1f/%-2d(%2d%%)",
-                           get_dodge(), level_num, exercise < 0 ? 0 : exercise );
-            } else {
-                mvwprintz( w_skills, line, 19, text_color, "%-2d(%2d%%)", level_num,
-                           ( exercise <  0 ? 0 : exercise ) );
-            }
-
-            line++;
-        }
-    }
-    wrefresh( w_skills );
-
-    // Finally, draw speed.
-    const std::string title_SPEED = _( "SPEED" );
-    center_print( w_speed, 0, c_light_gray, title_SPEED );
-    mvwprintz( w_speed, 1,  1, c_light_gray, _( "Base Move Cost:" ) );
-    mvwprintz( w_speed, 2,  1, c_light_gray, _( "Current Speed:" ) );
-    int newmoves = get_speed();
-    int pen = 0;
-    line = 3;
-    if( weight_carried() > weight_capacity() ) {
-        pen = 25 * ( weight_carried() - weight_capacity() ) / ( weight_capacity() );
-        mvwprintz( w_speed, line, 1, c_red, _( "Overburdened        -%s%d%%" ),
-                   ( pen < 10 ? " " : "" ), pen );
-        line++;
-    }
-    pen = get_pain_penalty().speed;
-    if( pen >= 1 ) {
-        mvwprintz( w_speed, line, 1, c_red, _( "Pain                -%s%d%%" ),
-                   ( pen < 10 ? " " : "" ), pen );
-        line++;
-    }
-    if( get_thirst() > 40 ) {
-        pen = abs( thirst_speed_penalty( get_thirst() ) );
-        mvwprintz( w_speed, line, 1, c_red, _( "Thirst              -%s%d%%" ),
-                   ( pen < 10 ? " " : "" ), pen );
-        line++;
-    }
-    if( get_hunger() > 100 ) {
-        pen = abs( hunger_speed_penalty( get_hunger() ) );
-        mvwprintz( w_speed, line, 1, c_red, _( "Hunger              -%s%d%%" ),
-                   ( pen < 10 ? " " : "" ), pen );
-        line++;
-    }
-    if( has_trait( trait_id( "SUNLIGHT_DEPENDENT" ) ) && !g->is_in_sunlight( pos() ) ) {
-        pen = ( g->light_level( posz() ) >= 12 ? 5 : 10 );
-        mvwprintz( w_speed, line, 1, c_red, _( "Out of Sunlight     -%s%d%%" ),
-                   ( pen < 10 ? " " : "" ), pen );
-        line++;
-    }
-    if( has_trait( trait_id( "COLDBLOOD4" ) ) && g->get_temperature( g->u.pos() ) > 65 ) {
-        pen = ( g->get_temperature( g->u.pos() ) - 65 ) / 2;
-        mvwprintz( w_speed, line, 1, c_green, _( "Cold-Blooded        +%s%d%%" ),
-                   ( pen < 10 ? " " : "" ), pen );
-        line++;
-    }
-    if( ( has_trait( trait_id( "COLDBLOOD" ) ) || has_trait( trait_id( "COLDBLOOD2" ) ) ||
-          has_trait( trait_id( "COLDBLOOD3" ) ) || has_trait( trait_id( "COLDBLOOD4" ) ) ) &&
-        g->get_temperature( g->u.pos() ) < 65 ) {
-        if( has_trait( trait_id( "COLDBLOOD3" ) ) || has_trait( trait_id( "COLDBLOOD4" ) ) ) {
-            pen = ( 65 - g->get_temperature( g->u.pos() ) ) / 2;
-        } else if( has_trait( trait_id( "COLDBLOOD2" ) ) ) {
-            pen = ( 65 - g->get_temperature( g->u.pos() ) ) / 3;
-        } else {
-            pen = ( 65 - g->get_temperature( g->u.pos() ) ) / 5;
-        }
-        mvwprintz( w_speed, line, 1, c_red, _( "Cold-Blooded        -%s%d%%" ),
-                   ( pen < 10 ? " " : "" ), pen );
-        line++;
-    }
-
-    std::map<std::string, int> speed_effects;
-    std::string dis_text = "";
-    for( auto &elem : *effects ) {
-        for( auto &_effect_it : elem.second ) {
-            auto &it = _effect_it.second;
-            bool reduced = resists_effect( it );
-            int move_adjust = it.get_mod( "SPEED", reduced );
-            if( move_adjust != 0 ) {
-                dis_text = it.get_speed_name();
-                speed_effects[dis_text] += move_adjust;
-            }
-        }
-    }
-
-    for( auto &speed_effect : speed_effects ) {
-        nc_color col = ( speed_effect.second > 0 ? c_green : c_red );
-        mvwprintz( w_speed, line, 1, col, "%s", _( speed_effect.first.c_str() ) );
-        mvwprintz( w_speed, line, 21, col, ( speed_effect.second > 0 ? "+" : "-" ) );
-        mvwprintz( w_speed, line, ( abs( speed_effect.second ) >= 10 ? 22 : 23 ), col, "%d%%",
-                   abs( speed_effect.second ) );
-        line++;
-    }
-
-    int quick_bonus = int( newmoves - ( newmoves / 1.1 ) );
-    int bio_speed_bonus = quick_bonus;
-    if( has_trait( trait_id( "QUICK" ) ) && has_bionic( bionic_id( "bio_speed" ) ) ) {
-        bio_speed_bonus = int( newmoves / 1.1 - ( newmoves / 1.1 / 1.1 ) );
-        std::swap( quick_bonus, bio_speed_bonus );
-    }
-    if( has_trait( trait_id( "QUICK" ) ) ) {
-        mvwprintz( w_speed, line, 1, c_green, _( "Quick               +%s%d%%" ),
-                   ( quick_bonus < 10 ? " " : "" ), quick_bonus );
-        line++;
-    }
-    if( has_bionic( bionic_id( "bio_speed" ) ) ) {
-        mvwprintz( w_speed, line, 1, c_green, _( "Bionic Speed        +%s%d%%" ),
-                   ( bio_speed_bonus < 10 ? " " : "" ), bio_speed_bonus );
-    }
-
-    int runcost = run_cost( 100 );
-    nc_color col = ( runcost <= 100 ? c_green : c_red );
-    mvwprintz( w_speed, 1, ( runcost  >= 100 ? 21 : ( runcost  < 10 ? 23 : 22 ) ), col,
-               "%d", runcost );
-    col = ( newmoves >= 100 ? c_green : c_red );
-    mvwprintz( w_speed, 2, ( newmoves >= 100 ? 21 : ( newmoves < 10 ? 23 : 22 ) ), col,
-               "%d", newmoves );
-    wrefresh( w_speed );
+    speed_window speed(*this, *this->effects);
+    speed.set_windows(w_speed, w_info);
+    speed.print();
 
     catacurses::refresh();
 
     int curtab = 0;
-    size_t min, max;
-    line = 0;
+    unsigned line = 0;
     bool done = false;
-    size_t half_y = 0;
 
-    auto switch_category = [&]() {
-        line = 0;
-        if ( action == "NEXT_TAB" ) {
-            curtab++;
-        } else {
-            curtab--;
-        }
-        curtab %= 5;
-    };
+    const std::vector<player_window*> categories { &stats, &encumberance, &skills, &traits, &effects };
 
     // Initial printing is DONE.  Now we give the player a chance to scroll around
     // and "hover" over different items for more info.
     do {
         werase( w_info );
-        switch( curtab ) {
-            case 0: // Stats tab
-                stats.print(line);
 
-                action = ctxt.handle_input();
-                if( action == "DOWN" ) {
-                    line++;
-                    if( line == 4 ) {
-                        line = 0;
-                    }
-                } else if( action == "UP" ) {
-                    if( line == 0 ) {
-                        line = 3;
-                    } else {
-                        line--;
-                    }
-                } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
-                    switch_category();
-                    stats.print();
-                } else if( action == "QUIT" ) {
-                    done = true;
-                }
-                break;
-            case 1: { // Encumbrance tab
-                encumberance.print(line);
+        auto current_window = categories[curtab];
 
-                action = ctxt.handle_input();
-                if( action == "DOWN" ) {
-                    if( line < encumberance.values() ) {
-                        line++;
-                    }
-                } else if( action == "UP" ) {
-                    if( line > 0 ) {
-                        line--;
-                    }
-                } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
-                    switch_category();
-                    encumberance.print();
-                } else if( action == "QUIT" ) {
-                    done = true;
-                }
-                break;
+        current_window->print(line);
+
+        action = ctxt.handle_input();
+        if (action == "DOWN") {
+            line++;
+            if (line == current_window->values()) {
+                line = 0;
             }
-            case 3: // Traits tab
-                traits.print(line);
-
-                action = ctxt.handle_input();
-                if( action == "DOWN" ) {
-                    if( line < traitslist.size() - 1 ) {
-                        line++;
-                    }
-                    break;
-                } else if( action == "UP" ) {
-                    if( line > 0 ) {
-                        line--;
-                    }
-                } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
-                    switch_category();
-                    traits.print();
-                } else if( action == "QUIT" ) {
+        }
+        else if (action == "UP") {
+            if (line == 0) {
+                line = current_window->values();
+            }
+            else {
+                line--;
+            }
+        }
+        else if (action == "NEXT_TAB" || action == "PREV_TAB") {
+            line = 0;
+            if (action == "NEXT_TAB") {
+                curtab++;
+                if (curtab == categories.size())
+                    curtab = 0;
+            } else {
+                if (curtab == 0)
+                    curtab = categories.size();
+                else
+                    curtab--;
+            }
+            current_window->print();
+        }
+        else if (action == "CONFIRM" && current_window == &skills) {
+            get_skill_level_object(skills.get_skill(line)->ident()).toggleTraining();
+        }
+         else if (action == "QUIT") {
                     done = true;
-                }
-                break;
-
-            case 4: // Effects tab
-                mvwprintz( w_effects, 0, 0, h_light_gray, header_spaces.c_str() );
-                center_print( w_effects, 0, h_light_gray, title_EFFECTS );
-                half_y = effect_win_size_y / 2;
-                if( line <= half_y ) {
-                    min = 0;
-                    max = effect_win_size_y;
-                    if( effect_name.size() < max ) {
-                        max = effect_name.size();
-                    }
-                } else if( line >= effect_name.size() - half_y ) {
-                    min = ( effect_name.size() < effect_win_size_y ? 0 : effect_name.size() - effect_win_size_y );
-                    max = effect_name.size();
-                } else {
-                    min = line - half_y;
-                    max = line - half_y + effect_win_size_y;
-                    if( effect_name.size() < max ) {
-                        max = effect_name.size();
-                    }
-                }
-
-                for( size_t i = min; i < max; i++ ) {
-                    trim_and_print( w_effects, int( 1 + i - min ), 0, getmaxx( w_effects ) - 1,
-                                    i == line ? h_light_gray : c_light_gray, effect_name[i] );
-                }
-                if( line < effect_text.size() ) {
-                    fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, effect_text[line] );
-                }
-                wrefresh( w_effects );
-                wrefresh( w_info );
-
-                action = ctxt.handle_input();
-                if( action == "DOWN" ) {
-                    if( line < effect_name.size() - 1 ) {
-                        line++;
-                    }
-                    break;
-                } else if( action == "UP" ) {
-                    if( line > 0 ) {
-                        line--;
-                    }
-                } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
-                    switch_category();
-                } else if( action == "QUIT" ) {
-                    done = true;
-                }
-                break;
-
-            case 2: // Skills tab
-                mvwprintz( w_skills, 0, 0, h_light_gray, header_spaces.c_str() );
-                center_print( w_skills, 0, h_light_gray, title_SKILLS );
-                half_y = skill_win_size_y / 2;
-                if( line <= half_y ) {
-                    min = 0;
-                    max = skill_win_size_y;
-                    if( skillslist.size() < max ) {
-                        max = skillslist.size();
-                    }
-                } else if( line >= skillslist.size() - half_y ) {
-                    min = ( skillslist.size() < size_t( skill_win_size_y ) ? 0 : skillslist.size() - skill_win_size_y );
-                    max = skillslist.size();
-                } else {
-                    min = line - half_y;
-                    max = line - half_y + skill_win_size_y;
-                    if( skillslist.size() < max ) {
-                        max = skillslist.size();
-                    }
-                }
-
-                const Skill *selectedSkill = NULL;
-
-                for( size_t i = min; i < max; i++ ) {
-                    const Skill *aSkill = skillslist[i];
-                    const SkillLevel &level = get_skill_level_object( aSkill->ident() );
-
-                    const bool can_train = level.can_train();
-                    const bool training = level.isTraining();
-                    const bool rusting = level.isRusting();
-                    const int exercise = level.exercise();
-
-                    nc_color cstatus;
-                    if( i == line ) {
-                        selectedSkill = aSkill;
-                        if( !can_train ) {
-                            cstatus = rusting ? h_light_red : h_white;
-                        } else if( exercise >= 100 ) {
-                            cstatus = training ? h_pink : h_magenta;
-                        } else if( rusting ) {
-                            cstatus = training ? h_light_red : h_red;
-                        } else {
-                            cstatus = training ? h_light_blue : h_blue;
-                        }
-                    } else {
-                        if( rusting ) {
-                            cstatus = training ? c_light_red : c_red;
-                        } else if( !can_train ) {
-                            cstatus = c_white;
-                        } else {
-                            cstatus = training ? c_light_blue : c_blue;
-                        }
-                    }
-                    mvwprintz( w_skills, int( 1 + i - min ), 1, c_light_gray, "                         " );
-                    mvwprintz( w_skills, int( 1 + i - min ), 1, cstatus, "%s:", aSkill->name().c_str() );
-
-                    if( aSkill->ident() == skill_id( "dodge" ) ) {
-                        mvwprintz( w_skills, int( 1 + i - min ), 15, cstatus, "%-.1f/%-2d(%2d%%)",
-                                   get_dodge(), level.level(), exercise < 0 ? 0 : exercise );
-                    } else {
-                        mvwprintz( w_skills, int( 1 + i - min ), 19, cstatus, "%-2d(%2d%%)", level.level(),
-                                   ( exercise <  0 ? 0 : exercise ) );
-                    }
-                }
-
-                draw_scrollbar( w_skills, line, skill_win_size_y, int( skillslist.size() ), 1 );
-                wrefresh( w_skills );
-
-                werase( w_info );
-
-                if( line < skillslist.size() ) {
-                    fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, selectedSkill->description() );
-                }
-                wrefresh( w_info );
-
-                action = ctxt.handle_input();
-                if( action == "DOWN" ) {
-                    if( size_t( line ) < skillslist.size() - 1 ) {
-                        line++;
-                    }
-                } else if( action == "UP" ) {
-                    if( line > 0 ) {
-                        line--;
-                    }
-                } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
-                    switch_category();
-                } else if( action == "CONFIRM" ) {
-                    get_skill_level_object( selectedSkill->ident() ).toggleTraining();
-                } else if( action == "QUIT" ) {
-                    done = true;
-                }
         }
     } while( !done );
 
