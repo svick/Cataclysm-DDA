@@ -134,10 +134,10 @@ private:
             {
                 info_print_folded( _("Strength affects your melee damage, the amount of weight you can carry, your total HP, "
                         "your resistance to many diseases, and the effectiveness of actions which require brute force."));
-                info_print_label_value(3, _("Base HP:"), 22, "%3d", p.hp_max[1]);
+                info_print_label_value(3, _("Base HP:"), 23, "%3d", p.hp_max[1]);
                 bool metric = get_option<std::string>("USE_METRIC_WEIGHTS") == "kg";
-                info_print_label_value(4, metric ? _("Carry weight (kg):") : _("Carry weight (lbs):"), 21, "%4.1f", convert_weight(p.weight_capacity()));
-                info_print_label_value(5, _("Melee damage:"), 22, "%3.1f", p.bonus_damage(false));
+                info_print_label_value(4, metric ? _("Carry weight (kg):") : _("Carry weight (lbs):"), 21, "%5.1f", convert_weight(p.weight_capacity()));
+                info_print_label_value(5, _("Melee damage:"), 23, "%3.1f", p.bonus_damage(false));
             }
         }
         else if (line == 1) {
@@ -147,9 +147,9 @@ private:
             {
                 info_print_folded( _("Dexterity affects your chance to hit in melee combat, helps you steady your "
                         "gun for ranged combat, and enhances many actions that require finesse."));
-                info_print_label_value(3, _("Melee to-hit bonus:"), 38, "%+.1lf", p.get_hit_base());
-                info_print_label_value(4, _("Ranged penalty:"), 38, "%+3d", -(abs(p.ranged_dex_mod())));
-                info_print_label_value(5, _("Throwing penalty per target's dodge:"), 38, "%+3d", p.throw_dispersion_per_dodge(false));
+                info_print_label_value(3, _("Melee to-hit bonus:"), 38, "%+4.1lf", p.get_hit_base());
+                info_print_label_value(4, _("Ranged penalty:"), 39, "%+3d", -(abs(p.ranged_dex_mod())));
+                info_print_label_value(5, _("Throwing penalty per target's dodge:"), 39, "%+3d", p.throw_dispersion_per_dodge(false));
             }
         }
         else if (line == 2) {
@@ -324,10 +324,10 @@ private:
         // @todo: utf8 aware printf would be nice... this works well enough for now
         auto out = body_part_name_as_heading(bp, combine ? 2 : 1);
 
-        int len = 7 - utf8_width(out);
+        int len = 9 - utf8_width(out);
         switch (sgn(len)) {
         case -1:
-            out = utf8_truncate(out, 7);
+            out = utf8_truncate(out, 9);
             break;
         case 1:
             out = out + std::string(len, ' ');
@@ -551,7 +551,9 @@ private:
         nc_color value_color = label_color;
 
         if (selected) {
+            std::string old_name = all_colors.get_name(label_color);
             label_color = hilite(label_color);
+            std::string new_name = all_colors.get_name(label_color);
         }
 
         mvwprintz(w_this, y, 1, label_color, skill->name());
@@ -728,6 +730,8 @@ void player::disp_info()
 {
     unsigned maxy = unsigned( TERMY );
 
+    encumberance_window encumberance(*this);
+
     traits_window traits(*this);
     effects_window effects(*this, *this->effects);
     skills_window skills(*this);
@@ -752,6 +756,14 @@ void player::disp_info()
         skill_win_size_y = maxy - infooffsetybottom;
     }
 
+    // if encumberance would scroll, but we have free space, move info lower
+    int free_y = maxy - (std::max({ effect_win_size_y, trait_win_size_y, skill_win_size_y }) + infooffsetybottom);
+    if (free_y > 0 && encumberance.values() > 8)
+    {
+        infooffsetytop += std::min(free_y, encumberance.values() - 8);
+        infooffsetybottom = infooffsetytop + 1 + info_win_size_y;
+    }
+
     catacurses::window w_grid_top    = catacurses::newwin( infooffsetybottom, FULL_SCREEN_WIDTH + 1,
                                        VIEW_OFFSET_Y, VIEW_OFFSET_X );
     catacurses::window w_grid_skill  = catacurses::newwin( skill_win_size_y + 1, 27,
@@ -763,19 +775,19 @@ void player::disp_info()
 
     catacurses::window w_tip     = catacurses::newwin( 1, FULL_SCREEN_WIDTH,  VIEW_OFFSET_Y,
                                    0 + VIEW_OFFSET_X );
-    catacurses::window w_stats   = catacurses::newwin( 9, 26,  1 + VIEW_OFFSET_Y,  0 + VIEW_OFFSET_X );
+    catacurses::window w_stats   = catacurses::newwin( infooffsetytop - 2, 26,  1 + VIEW_OFFSET_Y,  0 + VIEW_OFFSET_X );
     catacurses::window w_traits  = catacurses::newwin( trait_win_size_y, 26,
                                    infooffsetybottom + VIEW_OFFSET_Y, 27 + VIEW_OFFSET_X );
-    catacurses::window w_encumb  = catacurses::newwin( 9, 26,  1 + VIEW_OFFSET_Y, 27 + VIEW_OFFSET_X );
+    catacurses::window w_encumb  = catacurses::newwin( infooffsetytop - 2, 26,  1 + VIEW_OFFSET_Y, 27 + VIEW_OFFSET_X );
     catacurses::window w_effects = catacurses::newwin( effect_win_size_y, 26,
                                    infooffsetybottom + VIEW_OFFSET_Y, 54 + VIEW_OFFSET_X );
-    catacurses::window w_speed   = catacurses::newwin( 9, 26,  1 + VIEW_OFFSET_Y, 54 + VIEW_OFFSET_X );
+    catacurses::window w_speed   = catacurses::newwin( infooffsetytop - 2, 26,  1 + VIEW_OFFSET_Y, 54 + VIEW_OFFSET_X );
     catacurses::window w_skills  = catacurses::newwin( skill_win_size_y, 26,
                                    infooffsetybottom + VIEW_OFFSET_Y, 0 + VIEW_OFFSET_X );
     catacurses::window w_info    = catacurses::newwin( info_win_size_y, FULL_SCREEN_WIDTH,
                                    infooffsetytop + VIEW_OFFSET_Y, 0 + VIEW_OFFSET_X );
 
-    unsigned upper_info_border = 10;
+    unsigned upper_info_border = infooffsetytop - 1;
     unsigned lower_info_border = 1 + upper_info_border + info_win_size_y;
     for( unsigned i = 0; i < unsigned( FULL_SCREEN_WIDTH + 1 ); i++ ) {
         //Horizontal line top grid
@@ -904,7 +916,6 @@ void player::disp_info()
     stats.set_windows(w_stats, w_info);
     stats.print();
 
-    encumberance_window encumberance(*this);
     encumberance.set_windows(w_encumb, w_info);
     encumberance.print();
 
