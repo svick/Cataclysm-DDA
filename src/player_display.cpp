@@ -13,121 +13,13 @@
 #include "skill.h"
 
 #include <algorithm>
-#include <deque>
-
-const skill_id skill_swimming( "swimming" );
-
-// use this instead of having to type out 26 spaces like before
-static const std::string header_spaces( 26, ' ' );
-
-std::string swim_cost_text( int moves )
-{
-    return string_format( ngettext( "Swimming costs %+d movement point. ",
-                                    "Swimming costs %+d movement points. ",
-                                    moves ),
-                          moves );
-}
-
-std::string run_cost_text( int moves )
-{
-    return string_format( ngettext( "Running costs %+d movement point. ",
-                                    "Running costs %+d movement points. ",
-                                    moves ),
-                          moves );
-}
-
-std::string reload_cost_text( int moves )
-{
-    return string_format( ngettext( "Reloading costs %+d movement point. ",
-                                    "Reloading costs %+d movement points. ",
-                                    moves ),
-                          moves );
-}
-
-std::string melee_cost_text( int moves )
-{
-    return string_format( ngettext( "Melee and thrown attacks cost %+d movement point. ",
-                                    "Melee and thrown attacks cost %+d movement points. ",
-                                    moves ),
-                          moves );
-}
-
-std::string dodge_skill_text( double mod )
-{
-    return string_format( _( "Dodge skill %+.1f. " ), mod );
-}
-
-
-int get_encumbrance( const player &p, body_part bp, bool combine )
-{
-    // Body parts that can't combine with anything shouldn't print double values on combine
-    // This shouldn't happen, but handle this, just in case
-    bool combines_with_other = ( int )bp_aiOther[bp] != bp;
-    return p.encumb( bp ) * ( ( combine && combines_with_other ) ? 2 : 1 );
-}
-
-std::string get_encumbrance_description( const player &p, body_part bp, bool combine )
-{
-    std::string s;
-
-    const int eff_encumbrance = get_encumbrance( p, bp, combine );
-
-    switch( bp ) {
-        case bp_torso: {
-            const int melee_roll_pen = std::max( -eff_encumbrance, -80 );
-            s += string_format( _( "Melee attack rolls %+d%%; " ), melee_roll_pen );
-            s += dodge_skill_text( - ( eff_encumbrance / 10 ) );
-            s += swim_cost_text( ( eff_encumbrance / 10 ) * ( 80 - p.get_skill_level( skill_swimming ) * 3 ) );
-            s += melee_cost_text( eff_encumbrance );
-            break;
-        }
-        case bp_head:
-            s += _( "Head encumbrance has no effect; it simply limits how much you can put on." );
-            break;
-        case bp_eyes:
-            s += string_format( _( "Perception %+d when checking traps or firing ranged weapons;\n"
-                                   "Dispersion %+d when throwing items." ),
-                                -( eff_encumbrance / 10 ),
-                                eff_encumbrance * 10 );
-            break;
-        case bp_mouth:
-            s += _( "Covering your mouth will make it more difficult to breathe and catch your breath." );
-            break;
-        case bp_arm_l:
-        case bp_arm_r:
-            s += _( "Arm encumbrance affects stamina cost of melee attacks and accuracy with ranged weapons." );
-            break;
-        case bp_hand_l:
-        case bp_hand_r:
-            s += _( "Reduces the speed at which you can handle or manipulate items\n" );
-            s += reload_cost_text( ( eff_encumbrance / 10 ) * 15 );
-            s += string_format( _( "Dexterity %+.1f when throwing items;\n" ), -( eff_encumbrance / 10.0f ) );
-            s += melee_cost_text( eff_encumbrance / 2 );
-            s += "\n";
-            s += string_format( _( "Reduces aim speed of guns by %.1f." ), p.aim_speed_encumbrance_modifier() );
-            break;
-        case bp_leg_l:
-        case bp_leg_r:
-            s += run_cost_text( int( eff_encumbrance * 0.15 ) );
-            s += swim_cost_text( ( eff_encumbrance / 10 ) * ( 50 - p.get_skill_level(
-                                     skill_swimming ) * 2 ) / 2 );
-            s += dodge_skill_text( -eff_encumbrance / 10.0 / 4.0 );
-            break;
-        case bp_foot_l:
-        case bp_foot_r:
-            s += run_cost_text( int( eff_encumbrance * 0.25 ) );
-            break;
-        case num_bp:
-            break;
-    }
-
-    return s;
-}
 
 class player_window {
 private:
     const std::string title;
     catacurses::window w_info;
+
+    virtual void print_line(unsigned line, int y, bool selected) = 0;
 
 protected:
     catacurses::window w_this;
@@ -145,7 +37,7 @@ protected:
         mvwprintz(w_info, y, value_x, c_magenta, value_format.c_str(), std::forward<Args>(value_args)...);
     }
 
-    virtual void print_line(unsigned line, int y, bool selected) = 0;
+    ~player_window() {}
 
 public:
     virtual int values() = 0;
@@ -165,7 +57,7 @@ public:
         nc_color color = selected ? h_light_gray : c_light_gray;
 
         werase(w_this);
-        mvwprintz(w_this, 0, 0, color, header_spaces);
+        mvwprintz(w_this, 0, 0, color, std::string(26, ' '));
         center_print(w_this, 0, color, title);
 
         int win_size_y = getmaxy(w_this) - 1;
@@ -229,7 +121,7 @@ private:
         mvwprintz(w_this, line_n, 18, cstatus, "%2d", cur);
         mvwprintz(w_this, line_n, 21, c_light_gray, "(%2d)", max);
     }
-protected:
+
     virtual void print_line(unsigned line, int y, bool selected) override
     {
         y++;
@@ -240,8 +132,7 @@ protected:
 
             if (selected)
             {
-                info_print_folded(
-                    _("Strength affects your melee damage, the amount of weight you can carry, your total HP, "
+                info_print_folded( _("Strength affects your melee damage, the amount of weight you can carry, your total HP, "
                         "your resistance to many diseases, and the effectiveness of actions which require brute force."));
                 info_print_label_value(3, _("Base HP:"), 22, "%3d", p.hp_max[1]);
                 bool metric = get_option<std::string>("USE_METRIC_WEIGHTS") == "kg";
@@ -254,8 +145,7 @@ protected:
 
             if (selected)
             {
-                info_print_folded(
-                    _("Dexterity affects your chance to hit in melee combat, helps you steady your "
+                info_print_folded( _("Dexterity affects your chance to hit in melee combat, helps you steady your "
                         "gun for ranged combat, and enhances many actions that require finesse."));
                 info_print_label_value(3, _("Melee to-hit bonus:"), 38, "%+.1lf", p.get_hit_base());
                 info_print_label_value(4, _("Ranged penalty:"), 38, "%+3d", -(abs(p.ranged_dex_mod())));
@@ -267,8 +157,7 @@ protected:
 
             if (selected)
             {
-                info_print_folded(
-                    _("Intelligence is less important in most situations, but it is vital for more complex tasks like "
+                info_print_folded( _("Intelligence is less important in most situations, but it is vital for more complex tasks like "
                         "electronics crafting.  It also affects how much skill you can pick up from reading a book."));
                 info_print_label_value(3,_("Read times:"), 21, "%3d%%", p.read_speed(false));
                 info_print_label_value(4,_("Skill rust:"), 22, "%2d%%", p.rust_rate(false));
@@ -280,8 +169,7 @@ protected:
 
             if (selected)
             {
-                info_print_folded(
-                    _("Perception is the most important stat for ranged combat.  It's also used for "
+                info_print_folded( _("Perception is the most important stat for ranged combat.  It's also used for "
                         "detecting traps and other things of interest."));
                 info_print_label_value(4, _("Trap detection level:"), 23, "%2d", p.get_per());
                 if (p.ranged_per_mod() > 0) {
@@ -290,6 +178,7 @@ protected:
             }
         }
     }
+
 public:
     virtual int values() override
     {
@@ -298,6 +187,8 @@ public:
 
     stats_window(const player &player) : player_window(player, _("STATS")) {}
 };
+
+const skill_id skill_swimming("swimming");
 
 class encumberance_window : public player_window
 {
@@ -318,7 +209,109 @@ private:
             temperature_print_rescaling(p.temp_conv[l]) == temperature_print_rescaling(p.temp_conv[r]);
     }
 
-protected:
+    static std::string swim_cost_text(int moves)
+    {
+        return string_format(ngettext("Swimming costs %+d movement point. ",
+            "Swimming costs %+d movement points. ",
+            moves),
+            moves);
+    }
+
+    static std::string run_cost_text(int moves)
+    {
+        return string_format(ngettext("Running costs %+d movement point. ",
+            "Running costs %+d movement points. ",
+            moves),
+            moves);
+    }
+
+    static std::string reload_cost_text(int moves)
+    {
+        return string_format(ngettext("Reloading costs %+d movement point. ",
+            "Reloading costs %+d movement points. ",
+            moves),
+            moves);
+    }
+
+    static std::string melee_cost_text(int moves)
+    {
+        return string_format(ngettext("Melee and thrown attacks cost %+d movement point. ",
+            "Melee and thrown attacks cost %+d movement points. ",
+            moves),
+            moves);
+    }
+
+    static std::string dodge_skill_text(double mod)
+    {
+        return string_format(_("Dodge skill %+.1f. "), mod);
+    }
+
+    static int get_encumbrance(const player &p, body_part bp, bool combine)
+    {
+        // Body parts that can't combine with anything shouldn't print double values on combine
+        // This shouldn't happen, but handle this, just in case
+        bool combines_with_other = (int)bp_aiOther[bp] != bp;
+        return p.encumb(bp) * ((combine && combines_with_other) ? 2 : 1);
+    }
+
+    static std::string get_encumbrance_description(const player &p, body_part bp, bool combine)
+    {
+        std::string s;
+
+        const int eff_encumbrance = get_encumbrance(p, bp, combine);
+
+        switch (bp) {
+        case bp_torso: {
+            const int melee_roll_pen = std::max(-eff_encumbrance, -80);
+            s += string_format(_("Melee attack rolls %+d%%; "), melee_roll_pen);
+            s += dodge_skill_text(-(eff_encumbrance / 10));
+            s += swim_cost_text((eff_encumbrance / 10) * (80 - p.get_skill_level(skill_swimming) * 3));
+            s += melee_cost_text(eff_encumbrance);
+            break;
+        }
+        case bp_head:
+            s += _("Head encumbrance has no effect; it simply limits how much you can put on.");
+            break;
+        case bp_eyes:
+            s += string_format(_("Perception %+d when checking traps or firing ranged weapons;\n"
+                "Dispersion %+d when throwing items."),
+                -(eff_encumbrance / 10),
+                eff_encumbrance * 10);
+            break;
+        case bp_mouth:
+            s += _("Covering your mouth will make it more difficult to breathe and catch your breath.");
+            break;
+        case bp_arm_l:
+        case bp_arm_r:
+            s += _("Arm encumbrance affects stamina cost of melee attacks and accuracy with ranged weapons.");
+            break;
+        case bp_hand_l:
+        case bp_hand_r:
+            s += _("Reduces the speed at which you can handle or manipulate items\n");
+            s += reload_cost_text((eff_encumbrance / 10) * 15);
+            s += string_format(_("Dexterity %+.1f when throwing items;\n"), -(eff_encumbrance / 10.0f));
+            s += melee_cost_text(eff_encumbrance / 2);
+            s += "\n";
+            s += string_format(_("Reduces aim speed of guns by %.1f."), p.aim_speed_encumbrance_modifier());
+            break;
+        case bp_leg_l:
+        case bp_leg_r:
+            s += run_cost_text(int(eff_encumbrance * 0.15));
+            s += swim_cost_text((eff_encumbrance / 10) * (50 - p.get_skill_level(
+                skill_swimming) * 2) / 2);
+            s += dodge_skill_text(-eff_encumbrance / 10.0 / 4.0);
+            break;
+        case bp_foot_l:
+        case bp_foot_r:
+            s += run_cost_text(int(eff_encumbrance * 0.25));
+            break;
+        case num_bp:
+            break;
+        }
+
+        return s;
+    }
+
     virtual void print_line(unsigned line, int y, bool selected) override
     {
         body_part bp = parts[line];
@@ -396,7 +389,7 @@ class traits_window : public player_window
 {
 private:
     std::vector<trait_id> traits;
-protected:
+
     virtual void print_line(unsigned line, int y, bool selected) override
     {
         const auto &mdata = traits[line].obj();
@@ -412,6 +405,7 @@ protected:
                 mdata.name, traits[line]->description));
         }
     }
+
 public:
     virtual int values() override
     {
@@ -435,7 +429,7 @@ private:
     };
 
     std::vector<effect> effects;
-protected:
+
     virtual void print_line(unsigned line, int y, bool selected) override
     {
         trim_and_print(w_this, y, 1, getmaxx(w_this) - 1, selected ? h_light_gray : c_light_gray, effects[line].name);
@@ -445,6 +439,7 @@ protected:
             info_print_folded(effects[line].text);
         }
     }
+
 public:
     virtual int values() override
     {
@@ -511,7 +506,7 @@ class skills_window : public player_window
 {
 private:
     std::vector<const Skill*> skills;
-protected:
+
     virtual void print_line(unsigned line, int y, bool selected) override
     {
         auto skill = skills[line];
@@ -575,6 +570,7 @@ protected:
             info_print_folded(skill->description());
         }
     }
+
 public:
     virtual int values() override
     {
@@ -609,7 +605,7 @@ private:
     std::vector<modifier> modifiers;
     int runcost;
     int newmoves;
-protected:
+
     virtual void print_line(unsigned line, int y, bool selected) override
     {
         if (line == 0 || line == 1) {
@@ -641,6 +637,7 @@ protected:
             mvwprintz(w_this, y, 21, color, "%c%2d%%", modifier.value > 0 ? '+' : '-', abs(modifier.value));
         }
     }
+
 public:
     virtual int values() override
     {
@@ -678,15 +675,15 @@ public:
         if ((p.has_trait(trait_id("COLDBLOOD")) || p.has_trait(trait_id("COLDBLOOD2")) ||
             p.has_trait(trait_id("COLDBLOOD3")) || p.has_trait(trait_id("COLDBLOOD4"))) &&
             g->get_temperature(g->u.pos()) < 65) {
-            int pen;
+            int pen = 65 - g->get_temperature(g->u.pos());
             if (p.has_trait(trait_id("COLDBLOOD3")) || p.has_trait(trait_id("COLDBLOOD4"))) {
-                pen = (65 - g->get_temperature(g->u.pos())) / 2;
+                pen = pen / 2;
             }
             else if (p.has_trait(trait_id("COLDBLOOD2"))) {
-                pen = (65 - g->get_temperature(g->u.pos())) / 3;
+                pen = pen / 3;
             }
             else {
-                pen = (65 - g->get_temperature(g->u.pos())) / 5;
+                pen = pen / 5;
             }
             add_modifier(_("Cold-Blooded"), -pen);
         }
@@ -950,7 +947,7 @@ void player::disp_info()
         }
         else if (action == "UP") {
             if (line == 0) {
-                line = current_window->values();
+                line = current_window->values() - 1;
             }
             else {
                 line--;
