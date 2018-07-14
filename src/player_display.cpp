@@ -124,35 +124,61 @@ std::string get_encumbrance_description( const player &p, body_part bp, bool com
 }
 
 class player_window {
+private:
     const std::string title;
+
 protected:
     catacurses::window w_this;
     catacurses::window w_info;
     const player &p;
 
-    virtual unsigned values() = 0;
     virtual void print_line(unsigned line, int y, bool selected) = 0;
+
 public:
+    virtual int values() = 0;
+
     player_window(catacurses::window w_this, catacurses::window w_info, const player &player, const std::string title)
         : w_this(w_this), w_info(w_info), title(title), p(player) {}
 
     void print(int selected_line = - 1) 
     {
-        nc_color color = (selected_line != -1) ? h_light_gray : c_light_gray;
+        bool selected = selected_line != -1;
+        nc_color color = selected ? h_light_gray : c_light_gray;
 
         werase(w_this);
         mvwprintz(w_this, 0, 0, color, header_spaces);
         center_print(w_this, 0, color, title);
 
-        unsigned lines = std::min(unsigned(catacurses::getmaxy(w_this) - 1), values());
+        int win_size_y = getmaxy(w_this) - 1;
 
-        // TODO: scrolling
-        for (unsigned i = 0; i < lines; i++)
-        {
-            print_line(i, i + 1, i == selected_line);
+        int min, max;
+
+        int display_line = selected ? selected_line : 0;
+        int half_y = win_size_y / 2;
+        if (display_line <= half_y) {
+            min = 0;
+            max = std::min(win_size_y, values());
+        }
+        else if (display_line >= values() - half_y) {
+            min = values() < win_size_y ? 0 : values() - win_size_y;
+            max = values();
+        }
+        else {
+            min = display_line - half_y;
+            max = std::min(display_line - half_y + win_size_y, values());
         }
 
+        for (int i = min; i < max; i++)
+        {
+            print_line(i, i - min + 1, i == selected_line);
+        }
+
+        if (values() > win_size_y)
+            draw_scrollbar(w_this, min, win_size_y, values(), 1, 0, c_white, true);
+
         wrefresh(w_this);
+        if (selected)
+            wrefresh(w_info);
     }
 };
 
@@ -185,18 +211,13 @@ private:
         mvwprintz(w_this, line_n, 21, c_light_gray, "(%2d)", max);
     }
 protected:
-    virtual unsigned values() override
-    {
-        return 4;
-    }
-
     virtual void print_line(unsigned line, int y, bool selected) override
     {
         y++;
 
         if (line == 0) {
             // Display information on player strength in appropriate window
-            display_stat(_("Strength:"), p.str_cur, p.str_max, y, selected);
+            display_stat(_("Strength"), p.str_cur, p.str_max, y, selected);
 
             if (selected)
             {
@@ -217,7 +238,7 @@ protected:
             }
         }
         else if (line == 1) {
-            display_stat(_("Dexterity:"), p.dex_cur, p.dex_max, y, selected);
+            display_stat(_("Dexterity"), p.dex_cur, p.dex_max, y, selected);
 
             if (selected)
             {
@@ -233,7 +254,7 @@ protected:
             }
         }
         else if (line == 2) {
-            display_stat(_("Intelligence:"), p.int_cur, p.int_max, y, selected);
+            display_stat(_("Intelligence"), p.int_cur, p.int_max, y, selected);
 
             if (selected)
             {
@@ -249,7 +270,7 @@ protected:
             }
         }
         else if (line == 3) {
-            display_stat(_("Perception:"), p.per_cur, p.per_max, y, selected);
+            display_stat(_("Perception"), p.per_cur, p.per_max, y, selected);
 
             if (selected)
             {
@@ -264,11 +285,13 @@ protected:
                 }
             }
         }
-
-        if (selected)
-            wrefresh(w_info);
     }
 public:
+    virtual int values() override
+    {
+        return 4;
+    }
+
     stats_window(catacurses::window w_this, catacurses::window w_info, const player &player)
         : player_window(w_this, w_info, player, _("STATS")) {}
 };
@@ -276,7 +299,8 @@ public:
 class encumberance_window : public player_window
 {
 private:
-    std::set<body_part> parts;
+    std::vector<body_part> parts;
+    item *selected_clothing;
 
     // Rescale temperature value to one that the player sees
     static int temperature_print_rescaling(int temp)
@@ -292,95 +316,60 @@ private:
     }
 
 protected:
-    virtual unsigned values() override
+    virtual void print_line(unsigned line, int y, bool selected) override
+    {
+        body_part bp = parts[line];
+        const auto enc_data = p.get_encumbrance();
+        const encumbrance_data &e = enc_data[bp];
+        bool highlighted = (selected_clothing == nullptr) ? false :
+            (selected_clothing->covers(all_body_parts[bp]));
+        bool combine = should_combine_bps(bp, bp_aiOther[bp]);
+        // limb, and possible color highlighting
+        // @todo: utf8 aware printf would be nice... this works well enough for now
+        auto out = body_part_name_as_heading(bp, combine ? 2 : 1);
+
+        int len = 7 - utf8_width(out);
+        switch (sgn(len)) {
+        case -1:
+            out = utf8_truncate(out, 7);
+            break;
+        case 1:
+            out = out + std::string(len, ' ');
+            break;
+        }
+
+        // Two different highlighting schemes, highlight if the line is selected as per line being set.
+        // Make the text green if this part is covered by the passed in item.
+        nc_color limb_color = selected ?
+            (highlighted ? h_green : h_light_gray) :
+            (highlighted ? c_green : c_light_gray);
+        mvwprintz(w_this, y, 1, limb_color, out);
+        // accumulated encumbrance from clothing, plus extra encumbrance from layering
+        wprintz(w_this, encumb_color(e.encumbrance), string_format("%3d", e.armor_encumbrance));
+        // separator in low toned color
+        wprintz(w_this, c_light_gray, "+");
+        // take into account the new encumbrance system for layers
+        wprintz(w_this, encumb_color(e.encumbrance), string_format("%-3d", e.layer_penalty));
+        // print warmth, tethered to right hand side of the window
+        out = string_format("(% 3d)", temperature_print_rescaling(p.temp_conv[bp]));
+        mvwprintz(w_this, y, getmaxx(w_this) - 6, p.bodytemp_color(bp), out);
+
+        if (selected)
+        {
+            std::string s = get_encumbrance_description(p, bp, combine);
+            fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, s);
+            wrefresh(w_info);
+        }
+    }
+
+public:
+    virtual int values() override
     {
         return parts.size();
     }
 
-    virtual void print_line(unsigned line, int y, bool selected) override
-    {
-        const int height = getmaxy(w_this);
-        int orig_line = line;
-
-        // fill a set with the indices of the body parts to display
-        line = std::max(0U, line);
-        std::set<int> parts;
-        // check and optionally enqueue line+0, -1, +1, -2, +2, ...
-        int off = 0; // offset from line
-        int skip[2] = {}; // how far to skip on next neg/pos jump
-        do {
-            if (!skip[off > 0] && line + off >= 0 && line + off < num_bp) { // line+off is in bounds
-                parts.insert(line + off);
-                if (line + off != (int)bp_aiOther[line + off] &&
-                    should_combine_bps(line + off, bp_aiOther[line + off])) { // part of a pair
-                    skip[(int)bp_aiOther[line + off] > line + off] = 1; // skip the next candidate in this direction
-                }
-            }
-            else {
-                skip[off > 0] = 0;
-            }
-            if (off < 0) {
-                off = -off;
-            }
-            else {
-                off = -off - 1;
-            }
-        } while (off > -num_bp && (int)parts.size() < height - 1);
-
-        std::string out;
-        /*** I chose to instead only display X+Y instead of X+Y=Z. More room was needed ***
-        *** for displaying triple digit encumbrance, due to new encumbrance system.    ***
-        *** If the player wants to see the total without having to do them maths, the  ***
-        *** armor layers ui shows everything they want :-) -Davek                      ***/
-        int row = 1;
-        const auto enc_data = p.get_encumbrance();
-        for (auto bp : parts) {
-            const encumbrance_data &e = enc_data[bp];
-            bool highlighted = (selected_clothing == nullptr) ? false :
-                (selected_clothing->covers(static_cast<body_part>(bp)));
-            bool combine = should_combine_bps(bp, bp_aiOther[bp]);
-            out.clear();
-            // limb, and possible color highlighting
-            // @todo: utf8 aware printf would be nice... this works well enough for now
-            out = body_part_name_as_heading(all_body_parts[bp], combine ? 2 : 1);
-
-            int len = 7 - utf8_width(out);
-            switch (sgn(len)) {
-            case -1:
-                out = utf8_truncate(out, 7);
-                break;
-            case 1:
-                out = out + std::string(len, ' ');
-                break;
-            }
-
-            // Two different highlighting schemes, highlight if the line is selected as per line being set.
-            // Make the text green if this part is covered by the passed in item.
-            nc_color limb_color = (orig_line == bp) ?
-                (highlighted ? h_green : h_light_gray) :
-                (highlighted ? c_green : c_light_gray);
-            mvwprintz(w_this, row, 1, limb_color, out);
-            // accumulated encumbrance from clothing, plus extra encumbrance from layering
-            wprintz(w_this, encumb_color(e.encumbrance), string_format("%3d", e.armor_encumbrance));
-            // separator in low toned color
-            wprintz(w_this, c_light_gray, "+");
-            // take into account the new encumbrance system for layers
-            wprintz(w_this, encumb_color(e.encumbrance), string_format("%-3d", e.layer_penalty));
-            // print warmth, tethered to right hand side of the window
-            out = string_format("(% 3d)", temperature_print_rescaling(p.temp_conv[bp]));
-            mvwprintz(w_this, row, getmaxx(w_this) - 6, p.bodytemp_color(bp), out);
-            row++;
-        }
-
-        if (off > -num_bp) { // not every body part fit in the window
-                             //TODO: account for skipped paired body parts in scrollbar math
-            draw_scrollbar(w_this, std::max(orig_line, 0), height - 1, num_bp, 1);
-        }
-
-    }
-public:
-    encumberance_window(catacurses::window w_this, catacurses::window w_info, const player &player)
-        : player_window(w_this, w_info, player, _("ENCUMBRANCE AND WARMTH"))
+    encumberance_window(catacurses::window w_this, catacurses::window w_info, const player &player, item *selected_clothing = nullptr)
+        : player_window(w_this, w_info, player, _("ENCUMBRANCE AND WARMTH")), selected_clothing(selected_clothing)
     {
         for (int bp = 0; bp < num_bp; bp++)
         {
@@ -390,10 +379,49 @@ public:
             if (other < bp && should_combine_bps(bp, other))
                 continue;
 
-            parts.insert(body_part(bp));
+            parts.push_back(body_part(bp));
         }
     }
 };
+
+void player::print_encumbrance(const catacurses::window &win, item *selected_clothing) const
+{
+    encumberance_window(win, catacurses::window(), *this, selected_clothing).print();
+}
+
+class traits_window : public player_window
+{
+private:
+    std::vector<trait_id> traits;
+protected:
+    virtual void print_line(unsigned line, int y, bool selected) override
+    {
+        const auto &mdata = traits[line].obj();
+        auto color = mdata.get_display_color();
+        if (selected)
+            color = hilite(color);
+        trim_and_print(w_this, y, 1, getmaxx(w_this) - 1, color, mdata.name);
+
+        if (selected)
+        {
+            fold_and_print(w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, string_format(
+                "<color_%s>%s</color>: %s", string_from_color(mdata.get_display_color()),
+                mdata.name, traits[line]->description));
+        }
+    }
+public:
+    virtual int values() override
+    {
+        return traits.size();
+    }
+
+    traits_window(catacurses::window w_this, catacurses::window w_info, const player &player, std::vector<trait_id> traits)
+        : player_window(w_this, w_info, player, _("TRAITS")), traits(traits)
+    {
+        std::sort(this->traits.begin(), this->traits.end(), trait_display_sort);
+    }
+};
+
 
 void player::disp_info()
 {
@@ -630,27 +658,17 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
     help_msg.clear();
     wrefresh( w_tip );
 
-    stats_window stats(w_stats, w_info, *this);
-
     // First!  Default STATS screen.
+    stats_window stats(w_stats, w_info, *this);
     stats.print();
 
     // Next, draw encumbrance.
-    const std::string title_ENCUMB = _( "ENCUMBRANCE AND WARMTH" );
-    center_print( w_encumb, 0, c_light_gray, title_ENCUMB );
-    print_encumbrance( w_encumb );
-    wrefresh( w_encumb );
+    encumberance_window encumberance(w_encumb, w_info, *this);
+    encumberance.print();
 
     // Next, draw traits.
-    const std::string title_TRAITS = _( "TRAITS" );
-    center_print( w_traits, 0, c_light_gray, title_TRAITS );
-    std::sort( traitslist.begin(), traitslist.end(), trait_display_sort );
-    for( size_t i = 0; i < traitslist.size() && i < trait_win_size_y; i++ ) {
-        const auto &mdata = traitslist[i].obj();
-        const auto color = mdata.get_display_color();
-        trim_and_print( w_traits, int( i ) + 1, 1, getmaxx( w_traits ) - 1, color, mdata.name );
-    }
-    wrefresh( w_traits );
+    traits_window traits(w_traits, w_info, *this, traitslist);
+    traits.print();
 
     // Next, draw effects.
     const std::string title_EFFECTS = _( "EFFECTS" );
@@ -873,83 +891,27 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
                 }
                 break;
             case 1: { // Encumbrance tab
-                werase( w_encumb );
-                mvwprintz( w_encumb, 0, 0, h_light_gray, header_spaces );
-                center_print( w_encumb, 0, h_light_gray, title_ENCUMB );
-                print_encumbrance( w_encumb, line );
-                wrefresh( w_encumb );
-
-                werase( w_info );
-                std::string s;
-
-                body_part bp = line <= 11 ? all_body_parts[line] : num_bp;
-                bool combined_here = ( bp_aiOther[line] == line + 1 ||
-                                       bp_aiOther[line] == line - 1 ) && // first of a pair
-                                     should_combine_bps( *this, line, bp_aiOther[line] );
-                s += get_encumbrance_description( *this, bp, combined_here );
-                fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, s );
-                wrefresh( w_info );
+                encumberance.print(line);
 
                 action = ctxt.handle_input();
                 if( action == "DOWN" ) {
-                    if( line < num_bp - 1 ) {
-                        if( combined_here ) {
-                            line += ( line < num_bp - 2 ) ? 2 : 0; // skip a line if we aren't at the last pair
-                        } else {
-                            line++; // unpaired or unequal
-                        }
+                    if( line < encumberance.values() ) {
+                        line++;
                     }
                 } else if( action == "UP" ) {
                     if( line > 0 ) {
-                        if( bp_aiOther[line] == line - 1 && // second of a pair
-                            should_combine_bps( *this, line, bp_aiOther[line] ) ) {
-                            line -= ( line > 1 ) ? 2 : 0; // skip a line if we aren't at the first pair
-                        } else {
-                            line--; // unpaired or unequal
-                        }
+                        line--;
                     }
                 } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
                     switch_category();
+                    encumberance.print();
                 } else if( action == "QUIT" ) {
                     done = true;
                 }
                 break;
             }
             case 3: // Traits tab
-                werase( w_traits );
-                mvwprintz( w_traits, 0, 0, h_light_gray, header_spaces );
-                center_print( w_traits, 0, h_light_gray, title_TRAITS );
-                if( line <= ( trait_win_size_y - 1 ) / 2 ) {
-                    min = 0;
-                    max = trait_win_size_y;
-                    if( traitslist.size() < max ) {
-                        max = traitslist.size();
-                    }
-                } else if( line >= traitslist.size() - ( trait_win_size_y + 1 ) / 2 ) {
-                    min = ( traitslist.size() < trait_win_size_y ? 0 : traitslist.size() - trait_win_size_y );
-                    max = traitslist.size();
-                } else {
-                    min = line - ( trait_win_size_y - 1 ) / 2;
-                    max = line + trait_win_size_y / 2 + 1;
-                    if( traitslist.size() < max ) {
-                        max = traitslist.size();
-                    }
-                }
-
-                for( size_t i = min; i < max; i++ ) {
-                    const auto &mdata = traitslist[i].obj();
-                    const auto color = mdata.get_display_color();
-                    trim_and_print( w_traits, int( 1 + i - min ), 1, getmaxx( w_traits ) - 1,
-                                    i == line ? hilite( color ) : color, mdata.name );
-                }
-                if( line < traitslist.size() ) {
-                    const auto &mdata = traitslist[line].obj();
-                    fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, string_format(
-                                        "<color_%s>%s</color>: %s", string_from_color( mdata.get_display_color() ),
-                                        mdata.name, traitslist[line]->description ) );
-                }
-                wrefresh( w_traits );
-                wrefresh( w_info );
+                traits.print(line);
 
                 action = ctxt.handle_input();
                 if( action == "DOWN" ) {
@@ -963,6 +925,7 @@ Strength - 4;    Dexterity - 4;    Intelligence - 4;    Perception - 4" ) );
                     }
                 } else if( action == "NEXT_TAB" || action == "PREV_TAB" ) {
                     switch_category();
+                    traits.print();
                 } else if( action == "QUIT" ) {
                     done = true;
                 }
