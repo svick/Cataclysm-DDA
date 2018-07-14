@@ -62,8 +62,8 @@ void color_manager::finalize()
             entry.custom = other.color;
         }
 
-        inverted_map.insert({ entry.color, entry.col_id });
-        inverted_map.insert({ entry.invert, entry.invert_id });
+        inverted_map.insert( { entry.color, entry.col_id } );
+        inverted_map.insert( { entry.invert, entry.invert_id } );
     }
 
     // Highlights in a next run, to make sure custom colors are set
@@ -178,7 +178,7 @@ void color_manager::add_color( const color_id col, const std::string &name,
 {
     color_struct st = {color_pair, nc_color(), nc_color(), nc_color(), {{nc_color(), nc_color(), nc_color(), nc_color(), nc_color(), nc_color(), nc_color()}}, col, inv_id, "", "" };
     color_array[col] = st;
-    inverted_map.insert({ color_pair, col });
+    inverted_map.insert( { color_pair, col } );
     name_map[name] = col;
 }
 
