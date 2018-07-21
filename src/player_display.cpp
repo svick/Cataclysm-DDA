@@ -699,87 +699,97 @@ class skills_window : public player_window
 class speed_window : public player_window
 {
     private:
-        const effects_map &effects;
+        struct modifier {
+            std::string label;
+            int value;
+        };
+
+        std::vector<modifier> modifiers;
+        int runcost;
+        int newmoves;
+
+        void add_modifier( const std::string &label, int value ) {
+            if( value == 0 ) {
+                return;
+            }
+
+            modifiers.push_back( { label, value } );
+        }
 
     public:
         virtual void print_impl( int ) override {
+            nc_color col = runcost <= 100 ? c_green : c_red;
             mvwprintz( w_this, 1, 1, c_light_gray, _( "Base Move Cost:" ) );
+            mvwprintz( w_this, 1, ( runcost >= 100 ? 21 : ( runcost  < 10 ? 23 : 22 ) ), col,
+                       "%d", runcost );
+            col = newmoves >= 100 ? c_green : c_red;
             mvwprintz( w_this, 2, 1, c_light_gray, _( "Current Speed:" ) );
-            int newmoves = p.get_speed();
-            int pen = 0;
+            mvwprintz( w_this, 2, ( newmoves >= 100 ? 21 : ( newmoves < 10 ? 23 : 22 ) ), col,
+                       "%d", newmoves );
+
             unsigned line = 3;
+
+            for( auto &modifier : modifiers ) {
+                nc_color color = modifier.value > 0 ? c_green : c_red;
+                mvwprintz( w_this, line, 1, color, modifier.label );
+                mvwprintz( w_this, line, 21, color, "%c%2d%%", modifier.value > 0 ? '+' : '-',
+                           abs( modifier.value ) );
+                line++;
+            }
+        }
+
+        virtual int values() override {
+            return -1;
+        }
+
+        speed_window( const player &player, const effects_map &effects_map )
+            : player_window( player, _( "SPEED" ) ) {
+            newmoves = p.get_speed();
+
             if( p.weight_carried() > p.weight_capacity() ) {
-                pen = 25 * ( p.weight_carried() - p.weight_capacity() ) / ( p.weight_capacity() );
-                mvwprintz( w_this, line, 1, c_red, _( "Overburdened        -%s%d%%" ),
-                           ( pen < 10 ? " " : "" ), pen );
-                line++;
+                int pen = 25 * ( p.weight_carried() - p.weight_capacity() ) / ( p.weight_capacity() );
+                add_modifier( _( "Overburdened" ), pen );
             }
-            pen = p.get_pain_penalty().speed;
-            if( pen >= 1 ) {
-                mvwprintz( w_this, line, 1, c_red, _( "Pain                -%s%d%%" ),
-                           ( pen < 10 ? " " : "" ), pen );
-                line++;
-            }
-            if( p.get_thirst() > 40 ) {
-                pen = abs( p.thirst_speed_penalty( p.get_thirst() ) );
-                mvwprintz( w_this, line, 1, c_red, _( "Thirst              -%s%d%%" ),
-                           ( pen < 10 ? " " : "" ), pen );
-                line++;
-            }
-            if( p.get_hunger() > 100 ) {
-                pen = abs( p.hunger_speed_penalty( p.get_hunger() ) );
-                mvwprintz( w_this, line, 1, c_red, _( "Hunger              -%s%d%%" ),
-                           ( pen < 10 ? " " : "" ), pen );
-                line++;
-            }
+
+            add_modifier( _( "Pain" ), -p.get_pain_penalty().speed );
+            add_modifier( _( "Thirst" ), p.thirst_speed_penalty( p.get_thirst() ) );
+            add_modifier( _( "Hunger" ), p.hunger_speed_penalty( p.get_hunger() ) );
+
             if( p.has_trait( trait_id( "SUNLIGHT_DEPENDENT" ) ) && !g->is_in_sunlight( p.pos() ) ) {
-                pen = ( g->light_level( p.posz() ) >= 12 ? 5 : 10 );
-                mvwprintz( w_this, line, 1, c_red, _( "Out of Sunlight     -%s%d%%" ),
-                           ( pen < 10 ? " " : "" ), pen );
-                line++;
+                add_modifier( _( "Out of Sunlight" ), g->light_level( p.posz() ) >= 12 ? -5 : -10 );
             }
             if( p.has_trait( trait_id( "COLDBLOOD4" ) ) && g->get_temperature( g->u.pos() ) > 65 ) {
-                pen = ( g->get_temperature( g->u.pos() ) - 65 ) / 2;
-                mvwprintz( w_this, line, 1, c_green, _( "Cold-Blooded        +%s%d%%" ),
-                           ( pen < 10 ? " " : "" ), pen );
-                line++;
+                int pen = ( g->get_temperature( g->u.pos() ) - 65 ) / 2;
+                add_modifier( _( "Cold-Blooded" ), pen );
             }
             if( ( p.has_trait( trait_id( "COLDBLOOD" ) ) || p.has_trait( trait_id( "COLDBLOOD2" ) ) ||
                   p.has_trait( trait_id( "COLDBLOOD3" ) ) || p.has_trait( trait_id( "COLDBLOOD4" ) ) ) &&
                 g->get_temperature( g->u.pos() ) < 65 ) {
+                int pen = 65 - g->get_temperature( g->u.pos() );
                 if( p.has_trait( trait_id( "COLDBLOOD3" ) ) || p.has_trait( trait_id( "COLDBLOOD4" ) ) ) {
-                    pen = ( 65 - g->get_temperature( g->u.pos() ) ) / 2;
+                    pen = pen / 2;
                 } else if( p.has_trait( trait_id( "COLDBLOOD2" ) ) ) {
-                    pen = ( 65 - g->get_temperature( g->u.pos() ) ) / 3;
+                    pen = pen / 3;
                 } else {
-                    pen = ( 65 - g->get_temperature( g->u.pos() ) ) / 5;
+                    pen = pen / 5;
                 }
-                mvwprintz( w_this, line, 1, c_red, _( "Cold-Blooded        -%s%d%%" ),
-                           ( pen < 10 ? " " : "" ), pen );
-                line++;
+                add_modifier( _( "Cold-Blooded" ), -pen );
             }
 
             std::map<std::string, int> speed_effects;
-            std::string dis_text = "";
-            for( auto &elem : effects ) {
+            for( auto &elem : effects_map ) {
                 for( auto &_effect_it : elem.second ) {
                     auto &it = _effect_it.second;
                     bool reduced = p.resists_effect( it );
                     int move_adjust = it.get_mod( "SPEED", reduced );
                     if( move_adjust != 0 ) {
-                        dis_text = it.get_speed_name();
-                        speed_effects[dis_text] += move_adjust;
+                        speed_effects[it.get_speed_name()] += move_adjust;
                     }
                 }
             }
 
             for( auto &speed_effect : speed_effects ) {
-                nc_color col = ( speed_effect.second > 0 ? c_green : c_red );
-                mvwprintz( w_this, line, 1, col, "%s", _( speed_effect.first.c_str() ) );
-                mvwprintz( w_this, line, 21, col, ( speed_effect.second > 0 ? "+" : "-" ) );
-                mvwprintz( w_this, line, ( abs( speed_effect.second ) >= 10 ? 22 : 23 ), col, "%d%%",
-                           abs( speed_effect.second ) );
-                line++;
+                add_modifier( _( speed_effect.first.c_str() ), speed_effect.second );
             }
 
             int quick_bonus = int( newmoves - ( newmoves / 1.1 ) );
@@ -789,30 +799,14 @@ class speed_window : public player_window
                 std::swap( quick_bonus, bio_speed_bonus );
             }
             if( p.has_trait( trait_id( "QUICK" ) ) ) {
-                mvwprintz( w_this, line, 1, c_green, _( "Quick               +%s%d%%" ),
-                           ( quick_bonus < 10 ? " " : "" ), quick_bonus );
-                line++;
+                add_modifier( _( "Quick" ), quick_bonus );
             }
             if( p.has_bionic( bionic_id( "bio_speed" ) ) ) {
-                mvwprintz( w_this, line, 1, c_green, _( "Bionic Speed        +%s%d%%" ),
-                           ( bio_speed_bonus < 10 ? " " : "" ), bio_speed_bonus );
+                add_modifier( _( "Bionic Speed" ), bio_speed_bonus );
             }
 
-            int runcost = p.run_cost( 100 );
-            nc_color col = ( runcost <= 100 ? c_green : c_red );
-            mvwprintz( w_this, 1, ( runcost >= 100 ? 21 : ( runcost  < 10 ? 23 : 22 ) ), col,
-                       "%d", runcost );
-            col = ( newmoves >= 100 ? c_green : c_red );
-            mvwprintz( w_this, 2, ( newmoves >= 100 ? 21 : ( newmoves < 10 ? 23 : 22 ) ), col,
-                       "%d", newmoves );
+            runcost = p.run_cost( 100 );
         }
-
-        virtual int values() override {
-            return -1;
-        }
-
-        speed_window( const player &player, const effects_map &effects_map )
-            : player_window( player, _( "SPEED" ) ), effects( effects_map ) { }
 };
 
 void player::disp_info()
