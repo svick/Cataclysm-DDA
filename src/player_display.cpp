@@ -58,40 +58,34 @@ class player_window
 class stats_window : public player_window
 {
     private:
+        void display_stat( const char *name, int cur, int max, int line_n ) {
+            nc_color cstatus;
+            if( cur <= 0 ) {
+                cstatus = c_dark_gray;
+            } else if( cur < max / 2 ) {
+                cstatus = c_red;
+            } else if( cur < max ) {
+                cstatus = c_light_red;
+            } else if( cur == max ) {
+                cstatus = c_white;
+            } else if( cur < max * 1.5 ) {
+                cstatus = c_light_green;
+            } else {
+                cstatus = c_green;
+            }
+
+            mvwprintz( w_this, line_n, 1, c_light_gray, name );
+            mvwprintz( w_this, line_n, 18, cstatus, "%2d", cur );
+            mvwprintz( w_this, line_n, 21, c_light_gray, "(%2d)", max );
+        }
+
         virtual void print_impl( int selected_line ) override {
             if( selected_line == -1 ) {
-                // Stats
-                const auto display_stat = [this]( const char *name, int cur, int max, int line_n ) {
-                    nc_color cstatus;
-                    if( cur <= 0 ) {
-                        cstatus = c_dark_gray;
-                    } else if( cur < max / 2 ) {
-                        cstatus = c_red;
-                    } else if( cur < max ) {
-                        cstatus = c_light_red;
-                    } else if( cur == max ) {
-                        cstatus = c_white;
-                    } else if( cur < max * 1.5 ) {
-                        cstatus = c_light_green;
-                    } else {
-                        cstatus = c_green;
-                    }
-
-                    mvwprintz( w_this, line_n, 1, c_light_gray, name );
-                    mvwprintz( w_this, line_n, 18, cstatus, "%2d", cur );
-                    mvwprintz( w_this, line_n, 21, c_light_gray, "(%2d)", max );
-                };
-
                 display_stat( _( "Strength:" ), p.str_cur, p.str_max, 2 );
                 display_stat( _( "Dexterity:" ), p.dex_cur, p.dex_max, 3 );
                 display_stat( _( "Intelligence:" ), p.int_cur, p.int_max, 4 );
                 display_stat( _( "Perception:" ), p.per_cur, p.per_max, 5 );
             } else {
-                // Clear bonus/penalty menu.
-                mvwprintz( w_this, 6, 0, c_light_gray, "%26s", "" );
-                mvwprintz( w_this, 7, 0, c_light_gray, "%26s", "" );
-                mvwprintz( w_this, 8, 0, c_light_gray, "%26s", "" );
-
                 if( selected_line == 0 ) {
                     // Display information on player strength in appropriate window
                     mvwprintz( w_this, 2, 1, h_light_gray, _( "Strength:" ) );
@@ -108,7 +102,6 @@ class stats_window : public player_window
                     mvwprintz( w_info, 4, 21, c_magenta, "%4.1f", convert_weight( p.weight_capacity() ) );
                     mvwprintz( w_info, 5, 1, c_magenta, _( "Melee damage:" ) );
                     mvwprintz( w_info, 5, 22, c_magenta, "%3.1f", p.bonus_damage( false ) );
-
                 } else if( selected_line == 1 ) {
                     // Display information on player dexterity in appropriate window
                     mvwprintz( w_this, 3, 1, h_light_gray, _( "Dexterity:" ) );
