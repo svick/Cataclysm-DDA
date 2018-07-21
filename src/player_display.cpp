@@ -16,6 +16,11 @@
 
 class player_window
 {
+    private:
+        const std::string title;
+
+        virtual void print_impl( int selected_line ) = 0;
+
     protected:
         catacurses::window w_this;
         catacurses::window w_info;
@@ -24,8 +29,6 @@ class player_window
         ~player_window() {}
 
     public:
-        virtual void print( int selected_line = -1 ) = 0;
-
         virtual int values() = 0;
 
         void set_windows( catacurses::window w_this, catacurses::window w_info ) {
@@ -33,21 +36,30 @@ class player_window
             this->w_info = w_info;
         }
 
-        player_window( const player &player )
-            : w_this(), w_info(), p( player ) {}
-};
+        void print( int selected_line = -1 ) {
+            bool selected = selected_line != -1;
+            nc_color color = selected ? h_light_gray : c_light_gray;
 
-// use this instead of having to type out 26 spaces like before
-static const std::string header_spaces( 26, ' ' );
+            mvwprintz( w_this, 0, 0, color, std::string( 26, ' ' ) );
+            center_print( w_this, 0, color, title );
+
+            print_impl( selected_line );
+
+            wrefresh( w_this );
+            if( selected ) {
+                wrefresh( w_info );
+            }
+        }
+
+        player_window( const player &player, const std::string title )
+            : w_this(), w_info(), title( title ), p( player ) {}
+};
 
 class stats_window : public player_window
 {
-    public:
-        virtual void print( int selected_line = -1 ) override {
-            const std::string title_STATS = _( "STATS" );
+    private:
+        virtual void print_impl( int selected_line ) override {
             if( selected_line == -1 ) {
-                center_print( w_this, 0, c_light_gray, title_STATS );
-
                 // Stats
                 const auto display_stat = [this]( const char *name, int cur, int max, int line_n ) {
                     nc_color cstatus;
@@ -74,12 +86,7 @@ class stats_window : public player_window
                 display_stat( _( "Dexterity:" ), p.dex_cur, p.dex_max, 3 );
                 display_stat( _( "Intelligence:" ), p.int_cur, p.int_max, 4 );
                 display_stat( _( "Perception:" ), p.per_cur, p.per_max, 5 );
-
-                wrefresh( w_this );
             } else {
-                mvwprintz( w_this, 0, 0, h_light_gray, header_spaces.c_str() );
-                center_print( w_this, 0, h_light_gray, title_STATS );
-
                 // Clear bonus/penalty menu.
                 mvwprintz( w_this, 6, 0, c_light_gray, "%26s", "" );
                 mvwprintz( w_this, 7, 0, c_light_gray, "%26s", "" );
@@ -139,16 +146,15 @@ class stats_window : public player_window
                         mvwprintz( w_info, 5, 21, c_magenta, "%+4d", -p.ranged_per_mod() );
                     }
                 }
-                wrefresh( w_this );
-                wrefresh( w_info );
             }
         }
 
+    public:
         virtual int values() override {
             return 4;
         }
 
-        stats_window( const player &player ) : player_window( player ) {}
+        stats_window( const player &player ) : player_window( player, _( "STATS" ) ) {}
 };
 
 const skill_id skill_swimming( "swimming" );
@@ -268,6 +274,7 @@ class encumberance_window : public player_window
                    temperature_print_rescaling( p.temp_conv[l] ) == temperature_print_rescaling( p.temp_conv[r] );
         }
 
+    private:
         void print_encumbrance( int line = -1 ) {
             const int height = getmaxy( w_this );
             int orig_line = line;
@@ -348,18 +355,10 @@ class encumberance_window : public player_window
             }
         }
 
-        virtual void print( int selected_line = -1 ) override {
-            const std::string title_ENCUMB = _( "ENCUMBRANCE AND WARMTH" );
-            if( selected_line == -1 ) {
-                center_print( w_this, 0, c_light_gray, title_ENCUMB );
-                print_encumbrance();
-                wrefresh( w_this );
-            } else {
-                werase( w_this );
-                center_print( w_this, 0, h_light_gray, title_ENCUMB );
-                print_encumbrance( selected_line );
-                wrefresh( w_this );
+        virtual void print_impl( int selected_line ) override {
+            print_encumbrance( selected_line );
 
+            if( selected_line != -1 ) {
                 werase( w_info );
                 std::string s;
 
@@ -369,16 +368,16 @@ class encumberance_window : public player_window
                                 should_combine_bps( p, selected_line, bp_aiOther[selected_line] );
                 s += get_encumbrance_description( p, bp, combined_here );
                 fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, s );
-                wrefresh( w_info );
             }
         }
 
+    public:
         virtual int values() override {
             return -1;
         }
 
         encumberance_window( const player &player, item *selected_clothing = nullptr )
-            : player_window( player ), selected_clothing( selected_clothing ) {
+            : player_window( player, _( "ENCUMBRANCE AND WARMTH" ) ), selected_clothing( selected_clothing ) {
         }
 };
 
@@ -387,7 +386,7 @@ void player::print_encumbrance( const catacurses::window &win, int line,
 {
     encumberance_window encumberance( *this, selected_clothing );
     encumberance.set_windows( win, catacurses::window() );
-    encumberance.print_encumbrance( -1 );
+    encumberance.print();
 }
 
 class traits_window : public player_window
@@ -395,24 +394,17 @@ class traits_window : public player_window
     private:
         std::vector<trait_id> traitslist;
 
-    public:
-        virtual void print( int selected_line = -1 ) override {
-            const std::string title_TRAITS = _( "TRAITS" );
+        virtual void print_impl( int selected_line ) override {
             unsigned trait_win_size_y = getmaxy( w_this ) - 1;
 
             if( selected_line == -1 ) {
-                center_print( w_this, 0, c_light_gray, title_TRAITS );
                 std::sort( traitslist.begin(), traitslist.end(), trait_display_sort );
                 for( size_t i = 0; i < traitslist.size() && i < trait_win_size_y; i++ ) {
                     const auto &mdata = traitslist[i].obj();
                     const auto color = mdata.get_display_color();
                     trim_and_print( w_this, int( i ) + 1, 1, getmaxx( w_this ) - 1, color, mdata.name );
                 }
-                wrefresh( w_this );
             } else {
-                werase( w_this );
-                mvwprintz( w_this, 0, 0, h_light_gray, header_spaces );
-                center_print( w_this, 0, h_light_gray, title_TRAITS );
                 size_t min, max;
                 if( selected_line <= ( trait_win_size_y - 1 ) / 2 ) {
                     min = 0;
@@ -443,17 +435,16 @@ class traits_window : public player_window
                                         "<color_%s>%s</color>: %s", string_from_color( mdata.get_display_color() ),
                                         mdata.name, traitslist[selected_line]->description ) );
                 }
-                wrefresh( w_this );
-                wrefresh( w_info );
             }
         }
 
+    public:
         virtual int values() override {
             return traitslist.size();
         }
 
         traits_window( const player &player )
-            : player_window( player ), traitslist( p.get_mutations() ) {
+            : player_window( player, _( "TRAITS" ) ), traitslist( p.get_mutations() ) {
         }
 };
 
@@ -464,20 +455,15 @@ class effects_window : public player_window
         std::vector<std::string> effect_text;
 
     public:
-        virtual void print( int selected_line = -1 ) override {
-            const std::string title_EFFECTS = _( "EFFECTS" );
+        virtual void print_impl( int selected_line ) override {
             unsigned effect_win_size_y = getmaxy( w_this ) - 1;
 
             if( selected_line == -1 ) {
-                center_print( w_this, 0, c_light_gray, title_EFFECTS );
                 for( size_t i = 0; i < effect_name.size() && i < effect_win_size_y; i++ ) {
                     trim_and_print( w_this, int( i ) + 1, 0, getmaxx( w_this ) - 1, c_light_gray,
                                     effect_name[i] );
                 }
-                wrefresh( w_this );
             } else {
-                mvwprintz( w_this, 0, 0, h_light_gray, header_spaces.c_str() );
-                center_print( w_this, 0, h_light_gray, title_EFFECTS );
                 size_t half_y = effect_win_size_y / 2;
                 size_t min, max;
                 if( selected_line <= half_y ) {
@@ -504,8 +490,6 @@ class effects_window : public player_window
                 if( selected_line < effect_text.size() ) {
                     fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, effect_text[selected_line] );
                 }
-                wrefresh( w_this );
-                wrefresh( w_info );
             }
         }
 
@@ -514,7 +498,7 @@ class effects_window : public player_window
         }
 
         effects_window( const player &player, const effects_map &effects_map )
-            : player_window( player ) {
+            : player_window( player, _( "EFFECTS" ) ) {
             std::string tmp = "";
             for( auto &elem : effects_map ) {
                 for( auto &_effect_it : elem.second ) {
@@ -581,14 +565,11 @@ class skills_window : public player_window
     public:
         const Skill *selectedSkill;
 
-        virtual void print( int selected_line = -1 ) override {
-            const std::string title_SKILLS = _( "SKILLS" );
+        virtual void print_impl( int selected_line ) override {
             unsigned skill_win_size_y = getmaxy( w_this ) - 1;
 
             if( selected_line == -1 ) {
                 unsigned line = 1;
-
-                center_print( w_this, 0, c_light_gray, title_SKILLS );
 
                 for( auto &elem : skillslist ) {
                     const SkillLevel &level = p.get_skill_level_object( elem->ident() );
@@ -641,11 +622,7 @@ class skills_window : public player_window
                         line++;
                     }
                 }
-                wrefresh( w_this );
             } else {
-
-                mvwprintz( w_this, 0, 0, h_light_gray, header_spaces.c_str() );
-                center_print( w_this, 0, h_light_gray, title_SKILLS );
                 size_t half_y = skill_win_size_y / 2;
                 size_t min, max;
                 if( selected_line <= half_y ) {
@@ -717,7 +694,6 @@ class skills_window : public player_window
                 if( selected_line < skillslist.size() ) {
                     fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, selectedSkill->description() );
                 }
-                wrefresh( w_info );
             }
         }
 
@@ -726,7 +702,7 @@ class skills_window : public player_window
         }
 
         skills_window( const player &player )
-            : player_window( player ) {
+            : player_window( player, _( "SKILLS" ) ) {
             skillslist = Skill::get_skills_sorted_by( [&]( Skill const & a, Skill const & b ) {
                 int const level_a = p.get_skill_level_object( a.ident() ).exercised_level();
                 int const level_b = p.get_skill_level_object( b.ident() ).exercised_level();
@@ -741,9 +717,7 @@ class speed_window : public player_window
         const effects_map &effects;
 
     public:
-        virtual void print( int selected_line = -1 ) override {
-            const std::string title_SPEED = _( "SPEED" );
-            center_print( w_this, 0, c_light_gray, title_SPEED );
+        virtual void print_impl( int ) override {
             mvwprintz( w_this, 1, 1, c_light_gray, _( "Base Move Cost:" ) );
             mvwprintz( w_this, 2, 1, c_light_gray, _( "Current Speed:" ) );
             int newmoves = p.get_speed();
@@ -846,7 +820,6 @@ class speed_window : public player_window
             col = ( newmoves >= 100 ? c_green : c_red );
             mvwprintz( w_this, 2, ( newmoves >= 100 ? 21 : ( newmoves < 10 ? 23 : 22 ) ), col,
                        "%d", newmoves );
-            wrefresh( w_this );
         }
 
         virtual int values() override {
@@ -854,7 +827,7 @@ class speed_window : public player_window
         }
 
         speed_window( const player &player, const effects_map &effects_map )
-            : player_window( player ), effects( effects_map ) { }
+            : player_window( player, _( "SPEED" ) ), effects( effects_map ) { }
 };
 
 void player::disp_info()
@@ -1080,7 +1053,6 @@ void player::disp_info()
                         line--;
                     }
                 } else if( action == "NEXT_TAB" ) {
-                    werase( w_stats );
                     stats.print();
                     line = 0;
                     curtab++;
@@ -1115,7 +1087,6 @@ void player::disp_info()
                         }
                     }
                 } else if( action == "NEXT_TAB" ) {
-                    werase( w_encumb );
                     encumberance.print();
                     line = 0;
                     curtab++;
@@ -1137,7 +1108,6 @@ void player::disp_info()
                         line--;
                     }
                 } else if( action == "NEXT_TAB" ) {
-                    werase( w_traits );
                     traits.print();
                     line = 0;
                     curtab++;
@@ -1160,7 +1130,6 @@ void player::disp_info()
                         line--;
                     }
                 } else if( action == "NEXT_TAB" ) {
-                    werase( w_effects );
                     effects.print();
                     line = 0;
                     curtab = 1;
@@ -1182,7 +1151,6 @@ void player::disp_info()
                         line--;
                     }
                 } else if( action == "NEXT_TAB" ) {
-                    werase( w_skills );
                     skills.print();
                     line = 0;
                     curtab++;
