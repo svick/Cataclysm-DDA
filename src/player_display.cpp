@@ -155,6 +155,7 @@ const skill_id skill_swimming( "swimming" );
 class encumberance_window : public player_window
 {
     private:
+        std::vector<body_part> parts;
         item *selected_clothing;
 
         // Rescale temperature value to one that the player sees
@@ -258,42 +259,34 @@ class encumberance_window : public player_window
             return s;
         }
 
-    public:
-        bool combined_here;
-
-        bool should_combine_bps( const player &p, size_t l, size_t r ) {
+        bool should_combine_bps( size_t l, size_t r ) {
             const auto enc_data = p.get_encumbrance();
             return enc_data[l] == enc_data[r] &&
                    temperature_print_rescaling( p.temp_conv[l] ) == temperature_print_rescaling( p.temp_conv[r] );
         }
 
-    private:
-        void print_encumbrance( int line = -1 ) {
-            const int height = getmaxy( w_this );
-            int orig_line = line;
+        virtual void print_impl( int selected_line ) override {
+            unsigned encumberance_win_size_y = getmaxy( w_this ) - 1;
 
-            // fill a set with the indices of the body parts to display
-            line = std::max( 0, line );
-            std::set<int> parts;
-            // check and optionally enqueue line+0, -1, +1, -2, +2, ...
-            int off = 0; // offset from line
-            int skip[2] = {}; // how far to skip on next neg/pos jump
-            do {
-                if( !skip[off > 0] && line + off >= 0 && line + off < num_bp ) { // line+off is in bounds
-                    parts.insert( line + off );
-                    if( line + off != ( int )bp_aiOther[line + off] &&
-                        should_combine_bps( p, line + off, bp_aiOther[line + off] ) ) { // part of a pair
-                        skip[( int )bp_aiOther[line + off] > line + off] = 1; // skip the next candidate in this direction
-                    }
-                } else {
-                    skip[off > 0] = 0;
+            int line = std::max( 0, selected_line );
+
+            size_t min, max;
+            if( line <= ( encumberance_win_size_y - 1 ) / 2 ) {
+                min = 0;
+                max = encumberance_win_size_y;
+                if( parts.size() < max ) {
+                    max = parts.size();
                 }
-                if( off < 0 ) {
-                    off = -off;
-                } else {
-                    off = -off - 1;
+            } else if( line >= parts.size() - ( encumberance_win_size_y + 1 ) / 2 ) {
+                min = ( parts.size() < encumberance_win_size_y ? 0 : parts.size() - encumberance_win_size_y );
+                max = parts.size();
+            } else {
+                min = line - ( encumberance_win_size_y - 1 ) / 2;
+                max = line + encumberance_win_size_y / 2 + 1;
+                if( parts.size() < max ) {
+                    max = parts.size();
                 }
-            } while( off > -num_bp && ( int )parts.size() < height - 1 );
+            }
 
             std::string out;
             /*** I chose to instead only display X+Y instead of X+Y=Z. More room was needed ***
@@ -302,11 +295,12 @@ class encumberance_window : public player_window
             *** armor layers ui shows everything they want :-) -Davek                      ***/
             int row = 1;
             const auto enc_data = p.get_encumbrance();
-            for( auto bp : parts ) {
+            for( size_t i = min; i < max; i++ ) {
+                body_part bp = parts[i];
                 const encumbrance_data &e = enc_data[bp];
                 bool highlighted = ( selected_clothing == nullptr ) ? false :
-                                   ( selected_clothing->covers( static_cast<body_part>( bp ) ) );
-                bool combine = should_combine_bps( p, bp, bp_aiOther[bp] );
+                                   ( selected_clothing->covers( bp ) );
+                bool combine = should_combine_bps( bp, bp_aiOther[bp] );
                 out.clear();
                 // limb, and possible color highlighting
                 // @todo: utf8 aware printf would be nice... this works well enough for now
@@ -324,7 +318,7 @@ class encumberance_window : public player_window
 
                 // Two different highlighting schemes, highlight if the line is selected as per line being set.
                 // Make the text green if this part is covered by the passed in item.
-                nc_color limb_color = ( orig_line == bp ) ?
+                nc_color limb_color = ( selected_line == i ) ?
                                       ( highlighted ? h_green : h_light_gray ) :
                                       ( highlighted ? c_green : c_light_gray );
                 mvwprintz( w_this, row, 1, limb_color, out.c_str() );
@@ -342,40 +336,38 @@ class encumberance_window : public player_window
                 row++;
             }
 
-            if( off > -num_bp ) { // not every body part fit in the window
-                //TODO: account for skipped paired body parts in scrollbar math
-                draw_scrollbar( w_this, std::max( orig_line, 0 ), height - 1, num_bp, 1 );
-            }
-        }
-
-        virtual void print_impl( int selected_line ) override {
-            print_encumbrance( selected_line );
+            draw_scrollbar( w_this, selected_line, encumberance_win_size_y, int( parts.size() ), 1 );
 
             if( selected_line != -1 ) {
                 werase( w_info );
-                std::string s;
 
-                body_part bp = selected_line <= 11 ? all_body_parts[selected_line] : num_bp;
-                combined_here = ( bp_aiOther[selected_line] == selected_line + 1 ||
-                                  bp_aiOther[selected_line] == selected_line - 1 ) && // first of a pair
-                                should_combine_bps( p, selected_line, bp_aiOther[selected_line] );
-                s += get_encumbrance_description( p, bp, combined_here );
+                body_part bp = parts[selected_line];
+                bool combined_here = should_combine_bps( bp, bp_aiOther[bp] );
+                auto s = get_encumbrance_description( p, bp, combined_here );
                 fold_and_print( w_info, 0, 1, FULL_SCREEN_WIDTH - 2, c_magenta, s );
             }
         }
-
     public:
         virtual int values() override {
-            return -1;
+            return parts.size();
         }
 
         encumberance_window( const player &player, item *selected_clothing = nullptr )
             : player_window( player, _( "ENCUMBRANCE AND WARMTH" ) ), selected_clothing( selected_clothing ) {
+            for( int bp = 0; bp < num_bp; bp++ ) {
+                int other = bp_aiOther[bp];
+
+                // always insert non-paired and first in pair; second in pair only when we're not combining
+                if( other < bp && should_combine_bps( bp, other ) ) {
+                    continue;
+                }
+
+                parts.push_back( body_part( bp ) );
+            }
         }
 };
 
-void player::print_encumbrance( const catacurses::window &win, int line,
-                                item *selected_clothing ) const
+void player::print_encumbrance( const catacurses::window &win, item *selected_clothing ) const
 {
     encumberance_window encumberance( *this, selected_clothing );
     encumberance.set_windows( win, catacurses::window() );
@@ -1063,21 +1055,12 @@ void player::disp_info()
 
                 action = ctxt.handle_input();
                 if( action == "DOWN" ) {
-                    if( line < num_bp - 1 ) {
-                        if( encumberance.combined_here ) {
-                            line += ( line < num_bp - 2 ) ? 2 : 0; // skip a line if we aren't at the last pair
-                        } else {
-                            line++; // unpaired or unequal
-                        }
+                    if( line < encumberance.values() - 1 ) {
+                        line++;
                     }
                 } else if( action == "UP" ) {
                     if( line > 0 ) {
-                        if( bp_aiOther[line] == line - 1 && // second of a pair
-                            encumberance.should_combine_bps( *this, line, bp_aiOther[line] ) ) {
-                            line -= ( line > 1 ) ? 2 : 0; // skip a line if we aren't at the first pair
-                        } else {
-                            line--; // unpaired or unequal
-                        }
+                        line--;
                     }
                 } else if( action == "NEXT_TAB" ) {
                     encumberance.print();
