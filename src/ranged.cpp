@@ -27,6 +27,7 @@
 #include "vehicle.h"
 #include "field.h"
 #include "mtype.h"
+#include "morale_types.h"
 
 #include <algorithm>
 #include <vector>
@@ -45,6 +46,7 @@ const efftype_id effect_hit_by_player( "hit_by_player" );
 static const trait_id trait_TRIGGERHAPPY( "TRIGGERHAPPY" );
 static const trait_id trait_HOLLOW_BONES( "HOLLOW_BONES" );
 static const trait_id trait_LIGHT_BONES( "LIGHT_BONES" );
+static const trait_id trait_PYROMANIA( "PYROMANIA" );
 
 static projectile make_gun_projectile( const item &gun );
 int time_to_fire( const Character &p, const itype &firing );
@@ -72,6 +74,20 @@ static double occupied_tile_fraction( m_size target_size )
 
 double Creature::ranged_target_size() const
 {
+    if( has_flag( MF_HARDTOSHOOT ) ) {
+        switch( get_size() ) {
+            case MS_TINY:
+                return occupied_tile_fraction( MS_TINY );
+            case MS_SMALL:
+                return occupied_tile_fraction( MS_TINY );
+            case MS_MEDIUM:
+                return occupied_tile_fraction( MS_SMALL );
+            case MS_LARGE:
+                return occupied_tile_fraction( MS_MEDIUM );
+            case MS_HUGE:
+                return occupied_tile_fraction( MS_LARGE );
+        }
+    }
     return occupied_tile_fraction( get_size() );
 }
 
@@ -243,6 +259,15 @@ int player::fire_gun( const tripoint &target, int shots, item& gun )
         sfx::generate_gun_sound( *this, gun );
 
         cycle_action( gun, pos() );
+
+        if( has_trait( trait_PYROMANIA ) && !has_morale( MORALE_PYROMANIA_STARTFIRE ) ) {
+            if( gun.ammo_type() == ammotype( "flammable" ) || gun.ammo_type() == ammotype( "66mm" ) ||
+                gun.ammo_type() == ammotype( "84x246mm" ) || gun.ammo_type() == ammotype( "m235" ) ) {
+                add_msg_if_player( m_good, string_format( _( "You feel a surge of euphoria as flames roar out of the %s!" ), gun.tname().c_str() ) );
+                add_morale( MORALE_PYROMANIA_STARTFIRE, 25, 25, 24_hours, 4_hours );
+                rem_morale( MORALE_PYROMANIA_NOFIRE );
+            }
+        }
 
         if( gun.ammo_consume( gun.ammo_required(), pos() ) != gun.ammo_required() ) {
             debugmsg( "Unexpected shortage of ammo whilst firing %s", gun.tname().c_str() );
@@ -454,8 +479,6 @@ dealt_projectile_attack player::throw_item( const tripoint &target, const item &
 
     float range = rl_dist( pos(), target );
     proj.range = range;
-    // Prevent light items from landing immediately
-    proj.momentum_loss = std::min( impact.total_damage() / 10.0f, 1.0f );
     int skill_lvl = get_skill_level( skill_used );
     // Avoid awarding tons of xp for lucky throws against hard to hit targets
     const float range_factor = std::min<float>( range, skill_lvl + 3 );
@@ -504,7 +527,10 @@ static std::string print_recoil( const player &p)
 
 // Draws the static portions of the targeting menu,
 // returns the number of lines used to draw instructions.
-static int draw_targeting_window( const catacurses::window &w_target, const std::string &name, player &p, target_mode mode, input_context &ctxt, const std::vector<aim_type> &aim_types, bool switch_mode, bool switch_ammo, bool tiny )
+static int draw_targeting_window( const catacurses::window &w_target, const std::string &name,
+                                  player &p, target_mode mode, input_context &ctxt,
+                                  const std::vector<aim_type> &aim_types, bool switch_mode,
+                                  bool switch_ammo, bool tiny )
 {
     draw_border(w_target);
     // Draw the "title" of the window.
@@ -710,7 +736,7 @@ static int print_ranged_chance( const player &p, const catacurses::window &w, in
                     // @todo: Consider not printing 0 chances, but only if you can print something (at least miss 100% or so)
                     int chance = std::min<int>( 100, 100.0 * ( config.aim_level * confidence ) ) - last_chance;
                     last_chance += chance;
-                    return string_format( "%s: %3d%%", config.label.c_str(), chance );
+                    return string_format( "%s: %3d%%", _( config.label.c_str() ), chance );
                 }, false );
             line_number += fold_and_print_from( w, line_number, 1, window_width, 0,
                                                 c_white, confidence_s );
@@ -753,9 +779,9 @@ static int print_aim( const player &p, const catacurses::window &w, int line_num
 
     // This could be extracted, to allow more/less verbose displays
     static const std::vector<confidence_rating> confidence_config = {{
-        { accuracy_critical, '*', _( "Great" ) },
-        { accuracy_standard, '+', _( "Normal" ) },
-        { accuracy_grazing, '|', _( "Graze" ) }
+        { accuracy_critical, '*', translate_marker_context( "aim_confidence", "Great" ) },
+        { accuracy_standard, '+', translate_marker_context( "aim_confidence", "Normal" ) },
+        { accuracy_grazing, '|', translate_marker_context( "aim_confidence", "Graze" ) }
     }};
 
     const double range = rl_dist( p.pos(), target.pos() );
@@ -796,12 +822,12 @@ static int draw_throw_aim( const player &p, const catacurses::window &w, int lin
     const double target_size = target != nullptr ? target->ranged_target_size() : 1.0f;
 
     static const std::vector<confidence_rating> confidence_config_critter = {{
-        { accuracy_critical, '*', _( "Great" ) },
-        { accuracy_standard, '+', _( "Normal" ) },
-        { accuracy_grazing, '|', _( "Graze" ) }
+        { accuracy_critical, '*', translate_marker_context( "aim_confidence", "Great" ) },
+        { accuracy_standard, '+', translate_marker_context( "aim_confidence", "Normal" ) },
+        { accuracy_grazing, '|', translate_marker_context( "aim_confidence", "Graze" ) }
     }};
     static const std::vector<confidence_rating> confidence_config_object = {{
-        { accuracy_grazing, '*', _( "Hit" ) }
+        { accuracy_grazing, '*', translate_marker_context( "aim_confidence", "Hit" ) }
     }};
     const auto &confidence_config = target != nullptr ?
       confidence_config_critter : confidence_config_object;
@@ -1521,15 +1547,20 @@ static double dispersion_from_skill( double skill, double weapon_dispersion )
         return 0.0;
     }
     double skill_shortfall = double( MAX_SKILL ) - skill;
-    // Flat penalty of 3 dispersion per point of skill under max.
-    double dispersion_penalty = 3.0 * skill_shortfall;
-    if( skill >= 5 ) {
+    // Flat penalty dispersion per point of skill under max.
+    double flat_penalty = get_option< float >( "GUN_DISPERSION_FLAT_PENALTY_PER_SKILL" );
+    double dispersion_penalty = flat_penalty * skill_shortfall;
+    double skill_threshold = get_option< float >( "GUN_DISPERSION_SKILL_THRESHOLD" );
+    double mult_post_threshold = get_option< float >( "GUN_DISPERSION_MULT_POST_SKILL_THRESHOLD" );
+    if( skill >= skill_threshold) {
+        double post_threshold_skill_shortfall = double( MAX_SKILL ) - skill;
         // Lack of mastery multiplies the dispersion of the weapon.
-        return dispersion_penalty + skill_shortfall * weapon_dispersion / 5.0;
+        return dispersion_penalty + weapon_dispersion * post_threshold_skill_shortfall * mult_post_threshold / ( double( MAX_SKILL ) - skill_threshold );
     }
     // Unskilled shooters suffer greater penalties, still scaling with weapon penalties.
-    double lower_skill_shortfall = 5.0 - skill;
-    dispersion_penalty += weapon_dispersion + lower_skill_shortfall * weapon_dispersion * 3.0 / 5.0;
+    double pre_threshold_skill_shortfall = skill_threshold - skill;
+    double mult_pre_thershold = get_option< float >( "GUN_DISPERSION_MULT_PRE_SKILL_THRESHOLD" );
+    dispersion_penalty += weapon_dispersion * ( mult_post_threshold + pre_threshold_skill_shortfall * mult_pre_thershold / skill_threshold);
 
     return dispersion_penalty;
 }

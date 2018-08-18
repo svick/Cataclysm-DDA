@@ -25,8 +25,10 @@
 #include "emit.h"
 #include "scent_map.h"
 #include "map_iterator.h"
+#include "morale_types.h"
 
 #include <queue>
+#include <algorithm>
 
 const species_id FUNGUS( "FUNGUS" );
 
@@ -168,7 +170,7 @@ const std::array<field_t, num_fields> fieldlist = { {
     {
         "fd_toxic_gas",
         {translate_marker( "hazy cloud" ),translate_marker( "toxic gas" ),translate_marker( "thick toxic gas" )}, '8', 8,
-        {def_c_white,def_c_light_green,def_c_green}, {true, false, false},{true, true, true}, 90_minutes,
+        {def_c_white,def_c_light_green,def_c_green}, {true, false, false},{true, true, true}, 10_minutes,
         {0,0,0},
         GAS,
         false
@@ -449,6 +451,14 @@ const std::array<field_t, num_fields> fieldlist = { {
         {0,0,0},
         GAS,
         false
+    },
+    {
+        "fd_smoke_vent",
+        {translate_marker( "smoke vent" ), translate_marker( "smoke vent" ), translate_marker( "smoke vent" )}, '%', 0,
+        {def_c_white,def_c_white,def_c_white}, {true, true, true}, {false, false, false}, 0_turns,
+        {0,0,0},
+        GAS,
+        false
     }
 } };
 
@@ -466,7 +476,7 @@ field_id field_from_ident(const std::string &field_ident)
 void map::create_burnproducts( const tripoint p, const item &fuel, const units::mass &burned_mass ) {
     std::vector<material_id> all_mats = fuel.made_of();
     if( all_mats.empty() ) {
-        return; 
+        return;
     }
     //Items that are multiple materials are assumed to be equal parts each.
     units::mass by_weight = burned_mass / all_mats.size();
@@ -896,7 +906,7 @@ bool map::process_fields_in_submap( submap *const current_submap,
                                 }
                             }
 
-                            fire_data frd{ cur.getFieldDensity(), 0.0f, 0.0f };
+                            fire_data frd( cur.getFieldDensity(), !can_spread );
                             // The highest # of items this fire can remove in one turn
                             int max_consume = cur.getFieldDensity() * 2;
 
@@ -905,7 +915,7 @@ bool map::process_fields_in_submap( submap *const current_submap,
                                 // destroyed by the fire, this changes the item weight, but may not actually
                                 // destroy it. We need to spawn products anyway.
                                 const units::mass old_weight = fuel->weight( false );
-                                bool destroyed = fuel->burn( frd, can_spread);
+                                bool destroyed = fuel->burn( frd );
                                 // If the item is considered destroyed, it may have negative charge count,
                                 // see `item::burn?. This in turn means `item::weight` returns a negative value,
                                 // which we can not use, so only call `weight` when it's still an existing item.
@@ -916,9 +926,12 @@ bool map::process_fields_in_submap( submap *const current_submap,
 
                                 if( destroyed ) {
                                     // If we decided the item was destroyed by fire, remove it.
-                                    // But remember its contents
+                                    // But remember its contents, except for irremovable mods, if any
                                     std::copy( fuel->contents.begin(), fuel->contents.end(),
                                                std::back_inserter( new_content ) );
+                                    new_content.erase( std::remove_if( new_content.begin(), new_content.end(), [&]( const item & i ) {
+                                        return i.is_irremovable();
+                                    } ), new_content.end() );
                                     fuel = items_here.erase( fuel );
                                     consumed++;
                                 } else {
@@ -1314,13 +1327,28 @@ bool map::process_fields_in_submap( submap *const current_submap,
                     case fd_gas_vent:
                     {
                         dirty_transparency_cache = true;
-                        for( const tripoint &pnt : points_in_radius( p, 1 ) ) {
+                        for( const tripoint &pnt : points_in_radius( p, cur.getFieldDensity() - 1 ) ) {
                             field &wandering_field = get_field( pnt );
                             tmpfld = wandering_field.findField(fd_toxic_gas);
-                            if (tmpfld && tmpfld->getFieldDensity() < 3) {
+                            if (tmpfld && tmpfld->getFieldDensity() < cur.getFieldDensity()) {
                                 tmpfld->setFieldDensity(tmpfld->getFieldDensity() + 1);
                             } else {
-                                add_field( pnt, fd_toxic_gas, 3 );
+                                add_field( pnt, fd_toxic_gas, cur.getFieldDensity() );
+                            }
+                        }
+                    }
+                        break;
+
+                    case fd_smoke_vent:
+                    {
+                        dirty_transparency_cache = true;
+                        for( const tripoint &pnt : points_in_radius( p, cur.getFieldDensity() - 1 ) ) {
+                            field &wandering_field = get_field( pnt );
+                            tmpfld = wandering_field.findField(fd_smoke);
+                            if (tmpfld && tmpfld->getFieldDensity() < cur.getFieldDensity()) {
+                                tmpfld->setFieldDensity(tmpfld->getFieldDensity() + 1);
+                            } else {
+                                add_field( pnt, fd_smoke, cur.getFieldDensity() );
                             }
                         }
                     }
@@ -1534,6 +1562,7 @@ bool map::process_fields_in_submap( submap *const current_submap,
                             curfield.findField( fd_relax_gas ) ||
                             curfield.findField( fd_nuke_gas ) ||
                             curfield.findField( fd_gas_vent ) ||
+                            curfield.findField( fd_smoke_vent ) ||
                             curfield.findField( fd_fungicidal_gas ) ||
                             curfield.findField( fd_fire_vent ) ||
                             curfield.findField( fd_flame_burst ) ||
@@ -2083,7 +2112,7 @@ void map::player_in_field( player &u )
                     break;
                 }
                 // Full body suits protect you from the effects of the gas.
-                if( u.worn_with_flag("GAS_PROOF") ) {
+                if( u.worn_with_flag( "GAS_PROOF" ) && u.get_env_resist( bp_mouth ) >= 15 && u.get_env_resist( bp_eyes ) >= 15 ) {
                     break;
                 }
                 bool inhaled = false;

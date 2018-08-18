@@ -2215,13 +2215,13 @@ void npc::drop_items( int weight, int volume )
         g->m.add_item_or_charges( pos(), dropped );
     }
     // Finally, describe the action if u can see it
-    std::string item_name_str = item_name.str();
     if( g->u.sees( *this ) ) {
         if( num_items_dropped >= 3 ) {
             add_msg( ngettext( "%s drops %d item.", "%s drops %d items.",
                                num_items_dropped ), name.c_str(),
                      num_items_dropped );
         } else {
+            std::string item_name_str = item_name.str();
             add_msg( _( "%1$s drops a %2$s." ), name.c_str(),
                      item_name_str.c_str() );
         }
@@ -2681,7 +2681,7 @@ float rate_food( const item &it, int want_nutr, int want_quench )
         return 0.0f;
     }
 
-    if( food->parasites ) {
+    if( food->parasites && !it.has_flag( "NO_PARASITES" ) ) {
         return 0.0;
     }
 

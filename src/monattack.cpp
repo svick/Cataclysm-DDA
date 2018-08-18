@@ -196,6 +196,53 @@ bool mattack::none(monster *)
     return true;
 }
 
+bool mattack::eat_crop( monster *z )
+{
+    for( const auto &p : g->m.points_in_radius( z->pos(), 1 ) ) {
+        if( g->m.has_flag( "PLANT", p ) && one_in( 4 ) ) {
+            g->m.ter_set( p, t_dirt );
+            g->m.furn_set( p, f_null );
+
+            auto items = g->m.i_at( p );
+            for( auto i = items.begin(); i != items.end(); ) {
+                if( i->is_seed() ) {
+                    g->m.i_rem( p, i );
+                    return true;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+bool mattack::eat_food( monster *z )
+{
+    for( const auto &p : g->m.points_in_radius( z->pos(), 1 ) ) {
+        //Protect crop seeds from carnivores, give omnivores eat_crop special also
+        if( g->m.has_flag( "PLANT", p ) ){
+            continue;
+        }
+        auto items = g->m.i_at( p );
+        for( auto i = items.begin(); i != items.end(); i++) {
+            //Fun limit prevents scavengers from eating feces
+            if( !i->is_food() || i->type->comestible->fun < -20 ) {
+                continue;
+            }
+            //Don't eat own eggs
+            if( z->type->baby_egg != i->type->get_id()) {
+                long consumed = 1;
+                if( i->count_by_charges() ) {
+                    g->m.use_charges( p, 0, i->type->get_id(), consumed );
+                } else {
+                    g->m.use_amount( p, 0, i->type->get_id(), consumed );
+                }
+                return true;
+            }
+        }
+    }
+    return true;
+}
+
 bool mattack::antqueen( monster *z )
 {
     std::vector<tripoint> egg_points;
@@ -2551,7 +2598,7 @@ bool mattack::fear_paralyze(monster *z)
         return false; // TODO: handle friendly monsters
     }
     if ( g->u.sees( *z ) && !g->u.has_effect( effect_fearparalyze ) ) {
-        if (g->u.has_artifact_with(AEP_PSYSHIELD) || (g->u.is_wearing("tinfoil_hat") && one_in(4))) {
+        if (g->u.has_artifact_with(AEP_PSYSHIELD) || (g->u.worn_with_flag( "PSYSHIELD_PARTIAL" ) && one_in(4))) {
             add_msg(_("The %s probes your mind, but is rebuffed!"), z->name().c_str());
         ///\EFFECT_INT decreases chance of being paralyzed by fear attack
         } else if ( rng(0, 20) > g->u.get_int() ) {
@@ -4328,38 +4375,38 @@ bool mattack::kamikaze(monster *z)
 
     // Get our blast radius
     int radius = -1;
-    if (exp_actor->fields_radius > radius) {
+    if( exp_actor->fields_radius > radius ) {
         radius = exp_actor->fields_radius;
     }
-    if (exp_actor->emp_blast_radius > radius) {
+    if( exp_actor->emp_blast_radius > radius ) {
         radius = exp_actor->emp_blast_radius;
     }
     // Extra check here to avoid sqrt if not needed
-    if (exp_actor->explosion.power > -1) {
-        int tmp = int(sqrt(double(exp_actor->explosion.power / 4)));
-        if (tmp > radius) {
+    if( exp_actor->explosion.power > -1 ) {
+        int tmp = int( sqrt( double( exp_actor->explosion.power / 4 ) ) );
+        if( tmp > radius ) {
             radius = tmp;
         }
     }
-    if( exp_actor->explosion.shrapnel.count > 0 ) {
+    if( exp_actor->explosion.shrapnel.casing_mass > 0 ) {
         // Actual factor is 2 * radius, but figure most pieces of shrapnel will miss
-        int tmp = int(sqrt(double(exp_actor->explosion.power / 4)));
-        if (tmp > radius) {
+        int tmp = int( sqrt( exp_actor->explosion.power ) );
+        if( tmp > radius ) {
             radius = tmp;
         }
     }
     // Flashbangs have a max range of 8
-    if (exp_actor->do_flashbang && radius < 8) {
+    if( exp_actor->do_flashbang && radius < 8 ) {
         radius = 8;
     }
-    if (radius <= -1) {
+    if( radius <= -1 ) {
         // Not a valid explosion size, toggle this special off to stop processing
-        z->disable_special("KAMIKAZE");
+        z->disable_special( "KAMIKAZE" );
         return true;
     }
 
     Creature *target = z->attack_target();
-    if (target == nullptr) {
+    if( target == nullptr ) {
         return false;
     }
     // Range is (radius + distance they expect to gain on you during the countdown)

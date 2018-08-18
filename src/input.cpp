@@ -86,6 +86,15 @@ std::string get_input_string_from_file( std::string fname )
     return ret;
 }
 
+long input_event::get_first_input() const
+{
+    if( sequence.empty() ) {
+        return UNKNOWN_UNICODE;
+    }
+
+    return sequence[0];
+}
+
 input_manager inp_mngr;
 
 void input_manager::init()
@@ -415,15 +424,15 @@ std::string input_manager::get_keyname( long ch, input_event_t inp_type, bool po
 }
 
 const std::vector<input_event> &input_manager::get_input_for_action( const std::string
-        &action_descriptor, const std::string context, bool *overwrites_default )
+        &action_descriptor, const std::string &context, bool *overwrites_default )
 {
     const action_attributes &attributes = get_action_attributes( action_descriptor, context,
                                           overwrites_default );
     return attributes.input_events;
 }
 
-long input_manager::get_first_char_for_action( const std::string action_descriptor,
-        const std::string context )
+long input_manager::get_first_char_for_action( const std::string &action_descriptor,
+        const std::string &context )
 {
     std::vector<input_event> input_events = get_input_for_action( action_descriptor, context );
     return input_events.empty() ? 0 : input_events[0].get_first_input();
@@ -431,7 +440,7 @@ long input_manager::get_first_char_for_action( const std::string action_descript
 
 const action_attributes &input_manager::get_action_attributes(
     const std::string &action_id,
-    const std::string context,
+    const std::string &context,
     bool *overwrites_default )
 {
 

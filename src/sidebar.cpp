@@ -299,7 +299,6 @@ void player::disp_status( const catacurses::window &w, const catacurses::window 
 
     // Print currently used style or weapon mode.
     std::string style;
-    const auto style_color = is_armed() ? c_red : c_blue;
     const auto &cur_style = style_selected.obj();
     if( cur_style.force_unarmed || cur_style.weapon_valid( weapon ) ) {
         style = _( cur_style.name.c_str() );
@@ -310,16 +309,17 @@ void player::disp_status( const catacurses::window &w, const catacurses::window 
     }
 
     if( !style.empty() ) {
+        const auto style_color = is_armed() ? c_red : c_blue;
         const int x = sideStyle ? ( getmaxx( weapwin ) - 13 ) : 0;
         mvwprintz( weapwin, 1, x, style_color, style );
     }
 
     wmove( w, sideStyle ? 1 : 2, 0 );
-    if( get_hunger() > 2800 ) {
+    if( get_hunger() >= 300 && get_starvation() > 2500 ) {
         wprintz( w, c_red,    _( "Starving!" ) );
-    } else if( get_hunger() > 1400 ) {
+    } else if( get_hunger() >= 300 && get_starvation() > 1100 ) {
         wprintz( w, c_light_red,  _( "Near starving" ) );
-    } else if( get_hunger() > 300 ) {
+    } else if( get_hunger() > 250 ) {
         wprintz( w, c_light_red,  _( "Famished" ) );
     } else if( get_hunger() > 100 ) {
         wprintz( w, c_yellow, _( "Very hungry" ) );

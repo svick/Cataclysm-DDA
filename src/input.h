@@ -88,13 +88,7 @@ struct input_event {
         sequence.push_back( s );
     }
 
-    long get_first_input() const {
-        if( sequence.empty() ) {
-            return 0;
-        }
-
-        return sequence[0];
-    }
+    long get_first_input() const;
 
     void add_input( const long input ) {
         sequence.push_back( input );
@@ -182,13 +176,13 @@ class input_manager
          *                           keybinding is overridden by something else in the given context.
          */
         const std::vector<input_event> &get_input_for_action( const std::string &action_descriptor,
-                const std::string context = "default", bool *overwrites_default = NULL );
+                const std::string &context = "default", bool *overwrites_default = NULL );
 
         /**
          * Return first char associated with an action ID in a given context.
          */
-        long get_first_char_for_action( const std::string action_descriptor,
-                                        const std::string context = "default" );
+        long get_first_char_for_action( const std::string &action_descriptor,
+                                        const std::string &context = "default" );
 
         /**
          * Initializes the input manager, aka loads the input mapping configuration JSON.
@@ -305,7 +299,7 @@ class input_manager
          */
         const action_attributes &get_action_attributes(
             const std::string &action_id,
-            const std::string context = "default",
+            const std::string &context = "default",
             bool *overwrites_default = NULL );
 
         /**
